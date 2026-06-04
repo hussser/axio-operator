@@ -1,12 +1,69 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const Anthropic = require('@anthropic-ai/sdk');
 const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const AI_KEY = process.env.GROQ_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+const USE_GROQ = !!process.env.GROQ_API_KEY;
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
+
+async function streamChat(systemPrompt, messages, onChunk, onDone, onError) {
+  if (USE_GROQ) {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: GROQ_MODEL, max_tokens: 2048, stream: true,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages] })
+    });
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = line.slice(6).trim();
+        if (d === '[DONE]') { onDone(); return; }
+        try { const j = JSON.parse(d); const t = j.choices?.[0]?.delta?.content; if (t) onChunk(t); } catch {}
+      }
+    }
+    onDone();
+  } else {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: AI_KEY });
+    const stream = await client.messages.stream({ model: 'claude-sonnet-4-6', max_tokens: 2048, system: systemPrompt, messages });
+    for await (const chunk of stream) {
+      if (chunk.type === 'content_block_delta' && chunk.delta?.text) onChunk(chunk.delta.text);
+    }
+    onDone();
+  }
+}
+
+async function callAI(systemPrompt, userMessage) {
+  if (USE_GROQ) {
+    const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${AI_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: GROQ_MODEL, max_tokens: 1500,
+        messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] })
+    });
+    const j = await resp.json();
+    return j.choices?.[0]?.message?.content || '';
+  } else {
+    const Anthropic = require('@anthropic-ai/sdk');
+    const client = new Anthropic({ apiKey: AI_KEY });
+    const r = await client.messages.create({ model: 'claude-sonnet-4-6', max_tokens: 1500,
+      messages: [{ role: 'user', content: userMessage }], system: systemPrompt });
+    return r.content[0].text;
+  }
+}
 
 app.use(cors());
 app.use(express.json());
@@ -70,8 +127,8 @@ Percutant, mémorable, orienté valeur.`
 app.post('/api/chat', async (req, res) => {
   const { messages, agentId = 'operator' } = req.body;
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(400).json({ error: 'Clé API Anthropic manquante dans .env' });
+  if (!AI_KEY) {
+    return res.status(400).json({ error: 'Clé API manquante (GROQ_API_KEY ou ANTHROPIC_API_KEY)' });
   }
 
   const agent = AGENTS[agentId] || AGENTS.operator;
@@ -81,22 +138,13 @@ app.post('/api/chat', async (req, res) => {
   res.setHeader('Connection', 'keep-alive');
 
   try {
-    const stream = await client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 2048,
-      system: agent.prompt,
-      messages
-    });
-
-    for await (const chunk of stream) {
-      if (chunk.type === 'content_block_delta' && chunk.delta?.text) {
-        res.write(`data: ${JSON.stringify({ text: chunk.delta.text })}\n\n`);
-      }
-    }
-
-    res.write('data: [DONE]\n\n');
-    res.end();
-
+    await streamChat(
+      agent.prompt,
+      messages,
+      (text) => res.write(`data: ${JSON.stringify({ text })}\n\n`),
+      () => { res.write('data: [DONE]\n\n'); res.end(); },
+      (err) => { res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`); res.end(); }
+    );
   } catch (err) {
     res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
     res.end();
@@ -139,17 +187,12 @@ Message : ${data.body}
 Instruction : ${data.instruction || 'Réponse professionnelle standard'}`;
     }
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 1500,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage }]
-    });
+    const result = await callAI(systemPrompt, userMessage);
 
     res.json({
       success: true,
       type,
-      result: response.content[0].text
+      result
     });
 
   } catch (err) {
@@ -179,14 +222,10 @@ app.post('/webhook/whatsapp', async (req, res) => {
     const userText = message.text.body;
     const phoneNumber = message.from;
 
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 500,
-      system: AGENTS.operator.prompt + '\nTu réponds via WhatsApp : sois très concis (max 3 phrases). Pas de markdown.',
-      messages: [{ role: 'user', content: userText }]
-    });
-
-    const replyText = response.content[0].text;
+    const replyText = await callAI(
+      AGENTS.operator.prompt + '\nTu réponds via WhatsApp : sois très concis (max 3 phrases). Pas de markdown.',
+      userText
+    );
 
     if (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID) {
       await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
@@ -215,7 +254,7 @@ app.get('/api/status', (req, res) => {
     version: '1.0.0',
     agents: Object.keys(AGENTS),
     integrations: {
-      claude: !!process.env.ANTHROPIC_API_KEY,
+      claude: !!process.env.GROQ_API_KEY || !!process.env.ANTHROPIC_API_KEY,
       google: !!process.env.GOOGLE_CLIENT_ID || !!process.env.N8N_WEBHOOK_SECRET,
       gmail: !!process.env.GMAIL_USER || !!process.env.N8N_WEBHOOK_SECRET,
       whatsapp: !!process.env.WHATSAPP_TOKEN,
