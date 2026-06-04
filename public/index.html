@@ -29,6 +29,24 @@
 }
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow: hidden; }
 
+/* ── Voice mode ── */
+#voiceBtn.on { color: var(--purple2); background: var(--purple-bg); border-color: var(--purple-border); animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(139,92,246,0.4)} 50%{box-shadow:0 0 0 8px rgba(139,92,246,0)} }
+#micBtn.on { color: var(--purple2); background: var(--purple-bg); }
+
+/* ── Email card ── */
+.email-card { background: rgba(139,92,246,0.08); border: 1px solid var(--purple-border); border-radius: 12px; padding: 14px 16px; margin: 8px 0 8px 44px; max-width: 520px; }
+.email-card-header { display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; color:var(--purple2); margin-bottom:12px; text-transform:uppercase; letter-spacing:.05em; }
+.email-field { display:flex; gap:10px; font-size:13px; margin-bottom:6px; }
+.email-label { color:var(--muted); min-width:42px; font-size:12px; padding-top:1px; }
+.email-val { color:var(--text); font-weight:500; }
+.email-body { font-size:13px; color:var(--muted); line-height:1.6; border-top:1px solid var(--border); margin-top:10px; padding-top:10px; white-space:pre-wrap; }
+.email-actions { display:flex; gap:8px; margin-top:12px; }
+.email-btn-send { display:flex; align-items:center; gap:6px; background:var(--purple); color:#fff; border:none; border-radius:8px; padding:7px 16px; font-size:13px; font-weight:600; cursor:pointer; }
+.email-btn-send:hover { background:#7c3aed; }
+.email-btn-cancel { background:transparent; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:7px 14px; font-size:13px; cursor:pointer; }
+.email-btn-cancel:hover { color:var(--text); }
+
 /* ── Orb ── */
 .orb-wrap { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
 .orb {
@@ -516,8 +534,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         <div class="input-wrap">
           <textarea id="userInput" placeholder="Dites-moi ce dont vous avez besoin…" rows="1"></textarea>
           <div class="input-actions">
-            <button class="act-btn" id="micBtn" aria-label="Dictée vocale">
+                <button class="act-btn" id="voiceBtn" title="Mode vocal Alexa" aria-label="Mode vocal">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button class="act-btn" id="micBtn" aria-label="Dictée vocale" title="Dicter">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
             </button>
             <button class="act-btn" id="sendBtn" aria-label="Envoyer">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
@@ -635,6 +656,9 @@ function init() {
   overlay.addEventListener('click', e => { if (e.target === overlay) closeSettings(); });
   toggleSidebar.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
   micBtn.addEventListener('click', toggleMic);
+  voiceBtn.addEventListener('click', toggleVoiceMode);
+  // Charger les voix TTS
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
   initSpeech();
 }
 
@@ -757,6 +781,15 @@ async function streamFromServer(typingEl) {
       }
     }
     messages.push({ role: 'assistant', content: full });
+    // Détection email
+    const emailData = detectEmailAction(full);
+    if (emailData) {
+      const cleanBubble = bubble;
+      bubble.innerHTML = md(full.replace(/AXIO_EMAIL:[\s\S]*/, '').trim());
+      showEmailConfirm(emailData, cleanBubble);
+    }
+    // TTS mode vocal
+    speak(full.replace(/AXIO_EMAIL:[\s\S]*/, '').trim());
   } catch (e) {
     typingEl.remove();
     addMsg('ai', `Erreur de connexion au serveur.\n\n_${e.message}_`);
@@ -764,6 +797,8 @@ async function streamFromServer(typingEl) {
 
   isLoading = false;
   sendBtn.disabled = false;
+  // Relancer écoute en mode vocal
+  if (voiceMode && !isSpeaking) setTimeout(startListening, 500);
   scroll();
 }
 
@@ -923,28 +958,149 @@ function switchTab(id, el) {
   document.getElementById(`tab-${id}`)?.classList.add('active');
 }
 
-// ── Speech ─────────────────────────────────────────────────────────────────
+// ── Speech & Voice Mode ────────────────────────────────────────────────────
+let voiceMode = false;
+let isSpeaking = false;
+
 function initSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { micBtn.style.display = 'none'; return; }
+  if (!SR) { micBtn.style.display = 'none'; voiceBtn.style.display = 'none'; return; }
   recognition = new SR();
   recognition.lang = 'fr-FR';
   recognition.continuous = false;
   recognition.interimResults = true;
+
   recognition.onresult = e => {
-    userInput.value = Array.from(e.results).map(r => r[0].transcript).join('');
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    userInput.value = transcript;
     autoResize();
+    // En mode vocal : envoyer automatiquement quand la phrase est finale
+    if (voiceMode && e.results[e.results.length - 1].isFinal) {
+      setTimeout(() => { if (userInput.value.trim()) send(); }, 300);
+    }
   };
-  recognition.onend = () => { isListening = false; micBtn.classList.remove('on'); };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove('on');
+    // En mode vocal : relancer l'écoute après réponse
+    if (voiceMode && !isSpeaking && !isLoading) {
+      setTimeout(startListening, 600);
+    }
+  };
   recognition.onerror = () => { isListening = false; micBtn.classList.remove('on'); };
 }
+
+function startListening() {
+  if (!recognition || isListening) return;
+  try {
+    recognition.start();
+    isListening = true;
+    micBtn.classList.add('on');
+    userInput.placeholder = '🎤 Je vous écoute…';
+  } catch(e) {}
+}
+
 function toggleMic() {
   if (!recognition) return;
-  if (isListening) { recognition.stop(); }
-  else { recognition.start(); isListening = true; micBtn.classList.add('on'); userInput.placeholder = 'Je vous écoute…'; }
+  if (isListening) { recognition.stop(); userInput.placeholder = 'Dites-moi ce dont vous avez besoin…'; }
+  else startListening();
+}
+
+function toggleVoiceMode() {
+  voiceMode = !voiceMode;
+  voiceBtn.classList.toggle('on', voiceMode);
+  if (voiceMode) {
+    voiceBtn.title = 'Mode vocal actif — cliquez pour désactiver';
+    addMsg('ai', '🎤 **Mode vocal activé.** Je vous écoute — parlez et je répondrai à voix haute.');
+    startListening();
+  } else {
+    voiceBtn.title = 'Mode vocal Alexa';
+    window.speechSynthesis.cancel();
+    recognition.stop();
+    userInput.placeholder = 'Dites-moi ce dont vous avez besoin…';
+  }
+}
+
+function speak(text) {
+  if (!voiceMode) return;
+  window.speechSynthesis.cancel();
+  // Nettoyer le texte pour la synthèse (supprimer markdown)
+  const clean = text.replace(/```[\s\S]*?```/g, 'code masqué')
+    .replace(/[*_#`~]/g, '').replace(/\n+/g, ' ').trim();
+  const utterance = new SpeechSynthesisUtterance(clean);
+  utterance.lang = 'fr-FR';
+  utterance.rate = 1.05;
+  utterance.pitch = 1;
+  // Préférer une voix française
+  const voices = window.speechSynthesis.getVoices();
+  const frVoice = voices.find(v => v.lang.startsWith('fr'));
+  if (frVoice) utterance.voice = frVoice;
+  isSpeaking = true;
+  utterance.onend = () => {
+    isSpeaking = false;
+    if (voiceMode && !isLoading) setTimeout(startListening, 400);
+  };
+  window.speechSynthesis.speak(utterance);
+}
+
+// ── Email detection & sending ───────────────────────────────────────────────
+function detectEmailAction(text) {
+  const match = text.match(/AXIO_EMAIL:\s*(\{[\s\S]*?\})/);
+  if (match) {
+    try { return JSON.parse(match[1]); } catch {}
+  }
+  return null;
+}
+
+function showEmailConfirm(emailData, bubbleEl) {
+  const card = document.createElement('div');
+  card.className = 'email-card';
+  card.innerHTML = `
+    <div class="email-card-header">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      Email prêt à envoyer
+    </div>
+    <div class="email-field"><span class="email-label">À</span><span class="email-val">${emailData.to}</span></div>
+    <div class="email-field"><span class="email-label">Objet</span><span class="email-val">${emailData.subject}</span></div>
+    <div class="email-body">${emailData.body.replace(/\n/g,'<br>')}</div>
+    <div class="email-actions">
+      <button class="email-btn-send" onclick="sendEmail(this, ${JSON.stringify(emailData).replace(/"/g,'&quot;')})">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Envoyer
+      </button>
+      <button class="email-btn-cancel" onclick="this.closest('.email-card').remove()">Annuler</button>
+    </div>
+  `;
+  bubbleEl.parentElement.after(card);
+  scroll();
+}
+
+async function sendEmail(btn, emailData) {
+  btn.disabled = true;
+  btn.textContent = 'Envoi…';
+  try {
+    const r = await fetch(`${serverUrl}/api/send-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(emailData)
+    });
+    const d = await r.json();
+    const card = btn.closest('.email-card');
+    if (d.success) {
+      card.innerHTML = `<div style="color:#22c55e;padding:10px;font-size:13px">✅ Email envoyé à ${emailData.to}</div>`;
+      addMsg('ai', `Email envoyé avec succès à **${emailData.to}** ✅`);
+      if (voiceMode) speak(`Email envoyé à ${emailData.to}`);
+    } else {
+      card.innerHTML = `<div style="color:#ef4444;padding:10px;font-size:13px">❌ Erreur : ${d.error}</div>`;
+    }
+  } catch(e) {
+    btn.textContent = 'Erreur';
+  }
 }
 
 // DOM refs shorthand
+const voiceBtn     = document.getElementById('voiceBtn');
 const chatArea     = document.getElementById('chatArea');
 const emptyState   = document.getElementById('emptyState');
 const userInput    = document.getElementById('userInput');

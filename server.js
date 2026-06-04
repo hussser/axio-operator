@@ -79,7 +79,11 @@ Tu parles toujours en français, tu vouvoies, tu vas droit au but.
 Tu peux : rédiger des briefs de RDV, préparer des emails, créer des plans d'action,
 analyser des marchés, préparer des pitchs, rédiger des propositions commerciales,
 organiser les priorités de la semaine, répondre à toutes les demandes business.
-Réponds toujours de façon structurée. Sois court et percutant.`
+Réponds toujours de façon structurée. Sois court et percutant.
+
+ENVOI D'EMAIL : Quand l'utilisateur demande d'envoyer un email, génère le contenu puis ajoute EXACTEMENT cette ligne à la fin (rien d'autre après) :
+AXIO_EMAIL:{"to":"destinataire@email.com","subject":"Objet de l'email","body":"Corps complet de l'email"}
+Ne mets pas de markdown dans le body de l'email. Utilise \\n pour les sauts de ligne.`
   },
   brief: {
     name: 'Agent Brief',
@@ -261,6 +265,29 @@ app.get('/api/status', (req, res) => {
       notion: !!process.env.NOTION_TOKEN
     }
   });
+});
+
+// ─── Envoi d'email via n8n/Gmail ───────────────────────────────────────────
+app.post('/api/send-email', async (req, res) => {
+  const { to, subject, body } = req.body;
+  if (!to || !subject || !body) return res.status(400).json({ error: 'Champs manquants' });
+
+  try {
+    // Via n8n webhook si configuré
+    if (process.env.N8N_WEBHOOK_SECRET && process.env.N8N_SEND_EMAIL_URL) {
+      await fetch(process.env.N8N_SEND_EMAIL_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET },
+        body: JSON.stringify({ to, subject, body })
+      });
+      return res.json({ success: true, method: 'n8n' });
+    }
+
+    // Fallback: générer le contenu de l'email (sans envoi si pas de config)
+    res.json({ success: true, method: 'preview', message: 'Email généré (configurez N8N_SEND_EMAIL_URL pour l\'envoi automatique)' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
