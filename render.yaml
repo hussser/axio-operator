@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: axio-operator
+    runtime: node
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: NODE_ENV
+        value: production
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: N8N_WEBHOOK_SECRET
+        sync: false
