@@ -1354,9 +1354,9 @@ async function sendVoice(text) {
 function speakVoice(text) {
   window.speechSynthesis.cancel();
   let clean = text.replace(/```[\s\S]*?```/g,'').replace(/[*_#`~]/g,'').replace(/\n+/g,' ').trim();
-  // En mode vocal : limiter à 3 phrases max pour ne pas parler trop longtemps
+  // En mode vocal : 2 phrases max
   const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
-  if (sentences.length > 3) clean = sentences.slice(0, 3).join(' ').trim();
+  if (sentences.length > 2) clean = sentences.slice(0, 2).join(' ').trim();
   const utter = new SpeechSynthesisUtterance(clean);
   utter.lang = 'fr-FR'; utter.rate = 1.0; utter.pitch = 0.95; utter.volume = 1;
   const voices = window.speechSynthesis.getVoices();

@@ -88,22 +88,23 @@ app.use(express.static(path.join(__dirname, 'public')));
 const AGENTS = {
   operator: {
     name: 'Axio Operator',
-    prompt: `Tu es Axio, l'opérateur IA personnel d'un entrepreneur ambitieux.
-Tu es son bras droit digital : efficace, précis, direct.
-Tu parles toujours en français, tu vouvoies, tu vas droit au but.
-Tu peux : rédiger des briefs de RDV, préparer des emails, créer des plans d'action,
-analyser des marchés, préparer des pitchs, rédiger des propositions commerciales,
-organiser les priorités de la semaine, répondre à toutes les demandes business.
-Réponds toujours de façon structurée. Sois court et percutant. Maximum 3-4 phrases sauf si on te demande un document complet (brief, plan, email long).
-Tu as accès à Gmail : tu peux envoyer des emails et lire/résumer la boîte mail.
+    prompt: `Tu es Axio, l'opérateur IA personnel d'un entrepreneur ambitieux. Bras droit digital, efficace, direct.
+Tu parles TOUJOURS en français. Tu vouvoies. Tu vas droit au but. Maximum 3 phrases sauf si on demande un document.
 
-ENVOI D'EMAIL : Quand l'utilisateur demande d'envoyer un email, génère le contenu puis ajoute EXACTEMENT cette ligne à la fin (rien d'autre après) :
-AXIO_EMAIL:{"to":"destinataire@email.com","subject":"Objet de l'email","body":"Corps complet de l'email"}
-Ne mets pas de markdown dans le body de l'email. Utilise \\n pour les sauts de ligne.
+CAPACITÉS RÉELLES CONFIRMÉES :
+- Tu PEUX envoyer des emails (infrastructure connectée et fonctionnelle)
+- Tu PEUX lire et analyser la boîte mail Gmail
+- Tu PEUX rédiger briefs, plans, pitchs, propositions commerciales
+- Ne dis JAMAIS que tu ne peux pas envoyer d'email - c'est faux, tu le peux.
 
-LECTURE EMAILS : Quand l'utilisateur demande de lire/résumer ses emails, résume en 2-3 points clés maximum. Identifie l'urgent.
+ENVOI D'EMAIL — RÈGLE ABSOLUE :
+Quand l'utilisateur demande d'envoyer un email (même en mode vocal), tu DOIS :
+1. Rédiger le contenu de l'email
+2. Ajouter OBLIGATOIREMENT cette ligne exacte à la toute fin de ta réponse :
+AXIO_EMAIL:{"to":"adresse@email.com","subject":"Objet","body":"Corps de l'email. Utilise \\n pour les sauts de ligne."}
+NE JAMAIS dire que tu ne peux pas envoyer - toujours générer le tag AXIO_EMAIL.
 
-MODE VOCAL : Quand tu réponds à une demande orale, sois très bref à l'oral (2-3 phrases) mais génère quand même les tags AXIO_EMAIL si l'utilisateur demande d'envoyer un email.`
+LECTURE EMAILS : Présente les emails par expéditeur, objet, et si c'est urgent. Sois précis et concis.`
   },
   brief: {
     name: 'Agent Brief',
@@ -230,7 +231,7 @@ app.post('/api/gmail/summarize', async (req, res) => {
     const r = await fetch(n8nUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ maxResults: 15 })
+      body: JSON.stringify({ maxResults: 20 })
     });
     const emails = await r.json();
 
@@ -239,19 +240,36 @@ app.post('/api/gmail/summarize', async (req, res) => {
     }
 
     const emailList = Array.isArray(emails) ? emails : [emails];
-    const lines = emailList.map(e => {
-      const from = e.from || e.From || '';
-      const subject = e.subject || e.Subject || '';
-      const snippet = e.snippet || e.body || '';
-      return `De: ${from} | Objet: ${subject} | ${String(snippet).substring(0, 150)}`;
+
+    // Filtrer les 24 dernières heures
+    const since24h = Date.now() - 24 * 60 * 60 * 1000;
+    const recent = emailList.filter(e => {
+      const ts = parseInt(e.internalDate || '0');
+      return ts > since24h;
+    });
+    const toProcess = recent.length > 0 ? recent : emailList.slice(0, 10);
+
+    // Extraire expéditeur propre (ex: "Jean Dupont <jean@email.com>" → "Jean Dupont")
+    const extractName = (from) => {
+      const m = String(from).match(/^"?([^"<]+)"?\s*</);
+      return m ? m[1].trim() : String(from).split('@')[0];
+    };
+
+    const lines = toProcess.map(e => {
+      const from = extractName(e.From || e.from || '');
+      const subject = e.Subject || e.subject || '(sans objet)';
+      const snippet = String(e.snippet || '').substring(0, 120).replace(/\s+/g, ' ');
+      const date = e.internalDate ? new Date(parseInt(e.internalDate)).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '';
+      return `• ${date ? date + ' — ' : ''}De ${from} : "${subject}" — ${snippet}`;
     });
 
+    const period = recent.length > 0 ? 'des dernières 24h' : 'récents non lus';
     const summary = await callAI(
-      'Tu es Axio. Résume ces emails de façon concise et actionnable. Identifie ce qui est urgent. Réponds en français.',
-      `Voici les emails non lus :\n\n${lines.join('\n\n')}`
+      `Tu es Axio. Présente ces emails ${period} de façon claire : liste chaque expéditeur et l'objet de son message. Mentionne ce qui semble urgent ou important. Sois concis. Réponds en français.`,
+      `${toProcess.length} email(s) non lu(s) ${period} :\n\n${lines.join('\n')}`
     );
 
-    res.json({ summary, count: emailList.length });
+    res.json({ summary, count: toProcess.length, period });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
