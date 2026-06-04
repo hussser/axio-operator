@@ -607,7 +607,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let apiKey    = localStorage.getItem('axio_apikey') || '';
-let serverUrl = localStorage.getItem('axio_server') || '';
+let serverUrl = localStorage.getItem('axio_server') || 'https://axio-blush.vercel.app';
 let currentAgent = 'operator';
 let messages = [];
 let isLoading = false;
