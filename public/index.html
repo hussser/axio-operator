@@ -1140,7 +1140,7 @@ async function sendTestEmail() {
 function switchTab(id, el) {
   document.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  const tabEl = el || document.querySelector(`.modal-tab:nth-child(${['api','integrations','n8n'].indexOf(id)+1})`);
+  const tabEl = el || document.querySelector(`.modal-tab:nth-child(${['api','email','integrations'].indexOf(id)+1})`);
   if (tabEl) tabEl.classList.add('active');
   document.getElementById(`tab-${id}`)?.classList.add('active');
 }
