@@ -2,7 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -11,6 +11,20 @@ const AI_KEY = process.env.GROQ_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 const USE_GROQ = !!process.env.GROQ_API_KEY;
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
+// ─── Gmail OAuth2 client ────────────────────────────────────────────────────
+function getGmailClient() {
+  const oauth2 = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI || `https://axio-blush.vercel.app/auth/google/callback`
+  );
+  if (process.env.GOOGLE_REFRESH_TOKEN) {
+    oauth2.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
+  }
+  return oauth2;
+}
+
+// ─── AI helpers ─────────────────────────────────────────────────────────────
 async function streamChat(systemPrompt, messages, onChunk, onDone, onError) {
   if (USE_GROQ) {
     const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -70,7 +84,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── System prompts par agent ───────────────────────────────────────────────
+// ─── System prompts ─────────────────────────────────────────────────────────
 const AGENTS = {
   operator: {
     name: 'Axio Operator',
@@ -81,10 +95,13 @@ Tu peux : rédiger des briefs de RDV, préparer des emails, créer des plans d'a
 analyser des marchés, préparer des pitchs, rédiger des propositions commerciales,
 organiser les priorités de la semaine, répondre à toutes les demandes business.
 Réponds toujours de façon structurée. Sois court et percutant.
+Tu as accès à Gmail : tu peux envoyer des emails et lire/résumer la boîte mail.
 
 ENVOI D'EMAIL : Quand l'utilisateur demande d'envoyer un email, génère le contenu puis ajoute EXACTEMENT cette ligne à la fin (rien d'autre après) :
 AXIO_EMAIL:{"to":"destinataire@email.com","subject":"Objet de l'email","body":"Corps complet de l'email"}
-Ne mets pas de markdown dans le body de l'email. Utilise \\n pour les sauts de ligne.`
+Ne mets pas de markdown dans le body de l'email. Utilise \\n pour les sauts de ligne.
+
+LECTURE EMAILS : Quand l'utilisateur demande de lire/résumer ses emails, réponds normalement avec le résumé qui t'a été fourni dans le contexte.`
   },
   brief: {
     name: 'Agent Brief',
@@ -95,45 +112,28 @@ Pour chaque réunion, tu fournis :
 - Informations importantes sur l'interlocuteur/l'entreprise
 - Questions stratégiques à poser
 - Résultat attendu de la réunion
-- Durée recommandée par point
 Sois concis, actionnable, professionnel.`
   },
   email: {
     name: 'Agent Email',
-    prompt: `Tu es l'agent Email de Axio. Tu rédiges des emails professionnels percutants.
-Pour chaque email tu fournis :
-- Objet (accrocheur, clair)
-- Corps de l'email (structuré, professionnel, personnalisé)
-- Call-to-action clair
-Tu adaptes le ton selon le destinataire (client, partenaire, fournisseur, prospect).
-Tu vas à l'essentiel. Pas de blabla inutile.`
+    prompt: `Tu es l'agent Email de Axio. Tu rédiges des emails professionnels percutants.`
   },
   plan: {
     name: 'Agent Plan',
-    prompt: `Tu es l'agent Plan d'action de Axio. Tu structures les priorités et les plans.
-Tu fournis toujours :
-- Objectif principal (1 phrase)
-- Actions prioritaires (avec deadlines)
-- Ressources nécessaires
-- Indicateurs de succès
-- Risques et blocages potentiels
-Format clair, structuré, avec des cases à cocher. Orienté résultats.`
+    prompt: `Tu es l'agent Plan d'action de Axio. Tu structures les priorités et les plans.`
   },
   pitch: {
     name: 'Agent Pitch',
-    prompt: `Tu es l'agent Pitch de Axio. Tu prépares des pitchs et argumentaires commerciaux.
-Tu structures selon le framework : Problème → Solution → Preuve → Offre → Action.
-Tu adaptes le pitch selon la durée (30s, 2min, 5min) et l'audience (investisseur, client, partenaire).
-Percutant, mémorable, orienté valeur.`
+    prompt: `Tu es l'agent Pitch de Axio. Tu prépares des pitchs et argumentaires commerciaux.`
   }
 };
 
-// ─── Route chat principal (streaming SSE) ───────────────────────────────────
+// ─── Chat (SSE streaming) ────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
   const { messages, agentId = 'operator' } = req.body;
 
   if (!AI_KEY) {
-    return res.status(400).json({ error: 'Clé API manquante (GROQ_API_KEY ou ANTHROPIC_API_KEY)' });
+    return res.status(400).json({ error: 'Clé API manquante' });
   }
 
   const agent = AGENTS[agentId] || AGENTS.operator;
@@ -156,162 +156,188 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ─── Webhook entrant depuis n8n ─────────────────────────────────────────────
-// n8n envoie des données ici après avoir collecté infos (agenda, CRM, etc.)
-app.post('/webhook/n8n', async (req, res) => {
-  const secret = req.headers['x-webhook-secret'];
-  if (secret !== process.env.N8N_WEBHOOK_SECRET) {
-    return res.status(401).json({ error: 'Unauthorized' });
+// ─── Gmail OAuth2 setup ──────────────────────────────────────────────────────
+app.get('/auth/google', (req, res) => {
+  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    return res.send('Configurez GOOGLE_CLIENT_ID et GOOGLE_CLIENT_SECRET dans Vercel.');
   }
+  const oauth2 = getGmailClient();
+  const url = oauth2.generateAuthUrl({
+    access_type: 'offline',
+    prompt: 'consent',
+    scope: [
+      'https://www.googleapis.com/auth/gmail.send',
+      'https://www.googleapis.com/auth/gmail.readonly',
+      'https://www.googleapis.com/auth/gmail.modify'
+    ]
+  });
+  res.redirect(url);
+});
 
-  const { type, data } = req.body;
-
+app.get('/auth/google/callback', async (req, res) => {
+  const { code } = req.query;
+  if (!code) return res.send('Erreur : pas de code');
   try {
-    let systemPrompt = AGENTS.operator.prompt;
-    let userMessage = '';
+    const oauth2 = getGmailClient();
+    const { tokens } = await oauth2.getToken(code);
+    res.send(`
+      <html><body style="font-family:sans-serif;padding:40px;background:#0a0a0f;color:#fff">
+        <h2 style="color:#8b5cf6">✅ Gmail connecté avec succès !</h2>
+        <p>Ajoutez cette variable dans Vercel → Settings → Environment Variables :</p>
+        <pre style="background:#1a1a2e;padding:16px;border-radius:8px;color:#a78bfa;word-break:break-all">
+GOOGLE_REFRESH_TOKEN=${tokens.refresh_token || '⚠️ null — relancez /auth/google'}
+        </pre>
+        <p style="color:#888">Après avoir ajouté la variable, faites un Redeploy dans Vercel.</p>
+      </body></html>
+    `);
+  } catch (err) {
+    res.send('Erreur : ' + err.message);
+  }
+});
 
-    if (type === 'brief_rdv') {
-      systemPrompt = AGENTS.brief.prompt;
-      userMessage = `Prépare un brief complet pour ce RDV :
-- Titre : ${data.title}
-- Date/Heure : ${data.datetime}
-- Avec : ${data.attendees?.join(', ') || 'Non précisé'}
-- Description : ${data.description || 'Aucune'}
-- Contexte CRM : ${data.crm_context || 'Aucun historique trouvé'}`;
-    } else if (type === 'daily_summary') {
-      userMessage = `Résume ma journée de demain et prépare-moi :
-RDVs : ${JSON.stringify(data.events)}
-Tâches en attente : ${JSON.stringify(data.tasks)}
-Emails importants : ${JSON.stringify(data.emails)}`;
-    } else if (type === 'email_reply') {
-      systemPrompt = AGENTS.email.prompt;
-      userMessage = `Rédige une réponse professionnelle à cet email :
-De : ${data.from}
-Objet : ${data.subject}
-Message : ${data.body}
-Instruction : ${data.instruction || 'Réponse professionnelle standard'}`;
-    }
+// ─── Gmail : lire les emails ─────────────────────────────────────────────────
+app.get('/api/gmail/inbox', async (req, res) => {
+  if (!process.env.GOOGLE_REFRESH_TOKEN) {
+    return res.status(400).json({ error: 'Gmail non connecté. Allez sur /auth/google pour connecter.' });
+  }
+  try {
+    const auth = getGmailClient();
+    const gmail = google.gmail({ version: 'v1', auth });
+    const maxResults = parseInt(req.query.max) || 10;
 
-    const result = await callAI(systemPrompt, userMessage);
-
-    res.json({
-      success: true,
-      type,
-      result
+    const list = await gmail.users.messages.list({
+      userId: 'me',
+      maxResults,
+      q: 'in:inbox -category:promotions -category:social'
     });
 
+    if (!list.data.messages?.length) return res.json({ emails: [] });
+
+    const emails = await Promise.all(
+      list.data.messages.map(async (m) => {
+        const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata',
+          metadataHeaders: ['From', 'Subject', 'Date'] });
+        const headers = msg.data.payload.headers;
+        const get = (name) => headers.find(h => h.name === name)?.value || '';
+        const snippet = msg.data.snippet || '';
+        return {
+          id: m.id,
+          from: get('From'),
+          subject: get('Subject'),
+          date: get('Date'),
+          snippet: snippet.substring(0, 200)
+        };
+      })
+    );
+
+    res.json({ emails });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Webhook WhatsApp (Meta Business API) ──────────────────────────────────
-// Vérification du webhook
-app.get('/webhook/whatsapp', (req, res) => {
-  if (req.query['hub.verify_token'] === process.env.WHATSAPP_VERIFY_TOKEN) {
-    return res.send(req.query['hub.challenge']);
-  }
-  res.status(403).send('Forbidden');
-});
+// ─── Gmail : envoyer un email ────────────────────────────────────────────────
+app.post('/api/send-email', async (req, res) => {
+  const { to, subject, body } = req.body;
+  if (!to || !subject || !body) return res.status(400).json({ error: 'Champs manquants' });
 
-// Réception des messages WhatsApp
-app.post('/webhook/whatsapp', async (req, res) => {
-  res.sendStatus(200);
+  if (!process.env.GOOGLE_REFRESH_TOKEN) {
+    return res.status(400).json({
+      error: 'Gmail non connecté. Connectez votre compte sur /auth/google'
+    });
+  }
 
   try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
-    if (!message || message.type !== 'text') return;
+    const auth = getGmailClient();
+    const gmail = google.gmail({ version: 'v1', auth });
 
-    const userText = message.text.body;
-    const phoneNumber = message.from;
+    const from = process.env.GMAIL_USER || 'me';
+    const raw = Buffer.from(
+      `From: Axio <${from}>\r\nTo: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
+    ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-    const replyText = await callAI(
-      AGENTS.operator.prompt + '\nTu réponds via WhatsApp : sois très concis (max 3 phrases). Pas de markdown.',
-      userText
-    );
-
-    if (process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_PHONE_ID) {
-      await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${process.env.WHATSAPP_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: phoneNumber,
-          type: 'text',
-          text: { body: replyText }
-        })
-      });
-    }
+    await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
+    res.json({ success: true, method: 'gmail' });
   } catch (err) {
-    console.error('WhatsApp error:', err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Status endpoint ────────────────────────────────────────────────────────
+// ─── Résumé IA des emails ────────────────────────────────────────────────────
+app.post('/api/gmail/summarize', async (req, res) => {
+  if (!process.env.GOOGLE_REFRESH_TOKEN) {
+    return res.status(400).json({ error: 'Gmail non connecté.' });
+  }
+  try {
+    const auth = getGmailClient();
+    const gmail = google.gmail({ version: 'v1', auth });
+
+    const list = await gmail.users.messages.list({ userId: 'me', maxResults: 15,
+      q: 'in:inbox -category:promotions -category:social is:unread' });
+
+    if (!list.data.messages?.length) {
+      return res.json({ summary: 'Aucun email non lu dans votre boîte de réception.' });
+    }
+
+    const emails = await Promise.all(
+      list.data.messages.map(async (m) => {
+        const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata',
+          metadataHeaders: ['From', 'Subject', 'Date'] });
+        const headers = msg.data.payload.headers;
+        const get = (name) => headers.find(h => h.name === name)?.value || '';
+        return `De: ${get('From')} | Objet: ${get('Subject')} | ${msg.data.snippet?.substring(0,150)}`;
+      })
+    );
+
+    const summary = await callAI(
+      'Tu es Axio. Résume ces emails de façon concise et actionnable. Identifie ce qui est urgent. Réponds en français.',
+      `Voici les emails non lus :\n\n${emails.join('\n\n')}`
+    );
+
+    res.json({ summary, count: emails.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Status ──────────────────────────────────────────────────────────────────
 app.get('/api/status', (req, res) => {
   res.json({
     status: 'online',
-    version: '1.0.0',
+    version: '2.0.0',
     agents: Object.keys(AGENTS),
     integrations: {
-      claude: !!process.env.GROQ_API_KEY || !!process.env.ANTHROPIC_API_KEY,
-      google: !!process.env.GOOGLE_CLIENT_ID || !!process.env.N8N_WEBHOOK_SECRET,
-      gmail: !!process.env.GMAIL_USER || !!process.env.N8N_WEBHOOK_SECRET,
+      ai: !!(process.env.GROQ_API_KEY || process.env.ANTHROPIC_API_KEY),
+      gmail: !!process.env.GOOGLE_REFRESH_TOKEN,
       whatsapp: !!process.env.WHATSAPP_TOKEN,
       notion: !!process.env.NOTION_TOKEN
     }
   });
 });
 
-// ─── Envoi d'email via SMTP (Gmail App Password) ──────────────────────────
-app.post('/api/send-email', async (req, res) => {
-  const { to, subject, body } = req.body;
-  if (!to || !subject || !body) return res.status(400).json({ error: 'Champs manquants' });
-
-  // Via n8n si configuré
-  if (process.env.N8N_SEND_EMAIL_URL) {
-    try {
-      await fetch(process.env.N8N_SEND_EMAIL_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET || '' },
-        body: JSON.stringify({ to, subject, body })
-      });
-      return res.json({ success: true, method: 'n8n' });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
+// ─── Webhook n8n entrant ─────────────────────────────────────────────────────
+app.post('/webhook/n8n', async (req, res) => {
+  const secret = req.headers['x-webhook-secret'];
+  if (secret !== process.env.N8N_WEBHOOK_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  const { type, data } = req.body;
+  try {
+    let systemPrompt = AGENTS.operator.prompt;
+    let userMessage = '';
+    if (type === 'brief_rdv') {
+      systemPrompt = AGENTS.brief.prompt;
+      userMessage = `Prépare un brief complet pour ce RDV :\n- Titre : ${data.title}\n- Date/Heure : ${data.datetime}\n- Avec : ${data.attendees?.join(', ') || 'Non précisé'}\n- Description : ${data.description || 'Aucune'}\n- Contexte CRM : ${data.crm_context || 'Aucun'}`;
+    } else if (type === 'daily_summary') {
+      userMessage = `Résume ma journée de demain :\nRDVs : ${JSON.stringify(data.events)}\nTâches : ${JSON.stringify(data.tasks)}\nEmails : ${JSON.stringify(data.emails)}`;
     }
+    const result = await callAI(systemPrompt, userMessage);
+    res.json({ success: true, type, result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-
-  // Via Gmail SMTP (App Password)
-  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
-    try {
-      const transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
-      });
-      await transporter.sendMail({
-        from: `"Axio" <${process.env.GMAIL_USER}>`,
-        to, subject,
-        text: body,
-        html: body.replace(/\n/g, '<br>')
-      });
-      return res.json({ success: true, method: 'gmail' });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
-    }
-  }
-
-  res.status(400).json({ error: 'Email non configuré. Ajoutez GMAIL_USER et GMAIL_APP_PASSWORD dans les variables d\'environnement Vercel.' });
 });
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 Axio AI Operator démarré sur http://localhost:${PORT}`);
-  console.log(`   Claude: ${process.env.ANTHROPIC_API_KEY ? '✅ connecté' : '❌ clé manquante'}`);
-  console.log(`   WhatsApp: ${process.env.WHATSAPP_TOKEN ? '✅ connecté' : '⚠️  non configuré'}`);
-  console.log(`   Google: ${process.env.GOOGLE_CLIENT_ID ? '✅ connecté' : '⚠️  non configuré'}\n`);
+  console.log(`\n🚀 Axio v2 démarré sur http://localhost:${PORT}`);
+  console.log(`   AI: ${AI_KEY ? (USE_GROQ ? '✅ Groq' : '✅ Claude') : '❌ manquant'}`);
+  console.log(`   Gmail: ${process.env.GOOGLE_REFRESH_TOKEN ? '✅ connecté' : '⚠️  /auth/google pour connecter'}\n`);
 });
