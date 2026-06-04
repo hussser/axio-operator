@@ -133,7 +133,7 @@ Sois concis, actionnable, professionnel.`
 
 // ─── Chat (SSE streaming) ────────────────────────────────────────────────────
 app.post('/api/chat', async (req, res) => {
-  const { messages, agentId = 'operator' } = req.body;
+  const { messages, agentId = 'operator', gmailContext } = req.body;
 
   if (!AI_KEY) {
     return res.status(400).json({ error: 'Clé API manquante' });
@@ -141,13 +141,18 @@ app.post('/api/chat', async (req, res) => {
 
   const agent = AGENTS[agentId] || AGENTS.operator;
 
+  // Injecter les vrais emails dans le system prompt si disponibles
+  const systemPrompt = gmailContext
+    ? `${agent.prompt}\n\n=== BOÎTE MAIL RÉELLE (dernières 24h) ===\n${gmailContext}\n=== FIN EMAILS ===\nUtilise UNIQUEMENT ces données quand l'utilisateur parle d'emails. Ne jamais inventer d'emails.`
+    : agent.prompt;
+
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
   try {
     await streamChat(
-      agent.prompt,
+      systemPrompt,
       messages,
       (text) => res.write(`data: ${JSON.stringify({ text })}\n\n`),
       () => { res.write('data: [DONE]\n\n'); res.end(); },

@@ -779,6 +779,7 @@ let voiceSpeed = parseFloat(localStorage.getItem('axio_voice_speed') || '1.0');
 let currentAgent = 'operator';
 let messages = [];
 let isLoading = false;
+let gmailCache = null; // emails chargés au démarrage, injectés dans chaque requête IA
 let recognition = null;
 let isListening = false;
 
@@ -794,6 +795,7 @@ const agentNames = {
 function init() {
   if (!apiKey && !serverUrl) apiBanner.classList.remove('hidden');
   checkStatus();
+  prefetchGmail();
   userInput.addEventListener('input', autoResize);
   userInput.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -902,6 +904,21 @@ function newConv() {
   messages = [];
   chatArea.querySelectorAll('.msg').forEach(m => m.remove());
   emptyState.style.display = '';
+}
+
+// ── Gmail prefetch au démarrage ─────────────────────────────────────────────
+async function prefetchGmail() {
+  try {
+    const r = await fetch(`${serverUrl}/api/gmail/inbox`);
+    const d = await r.json();
+    if (d.emails && d.emails.length > 0) {
+      gmailCache = d.emails.map(e => {
+        const name = (e.from||'').replace(/<.*>/,'').replace(/"/g,'').trim();
+        const time = e.date ? new Date(e.date).toLocaleString('fr-FR',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}) : '';
+        return `- ${time} | De: ${name} | Objet: ${e.subject} | ${e.snippet}`;
+      }).join('\n');
+    }
+  } catch(e) {}
 }
 
 // ── Gmail ──────────────────────────────────────────────────────────────────
@@ -1025,7 +1042,7 @@ async function streamFromServer(typingEl) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, agentId: currentAgent })
+      body: JSON.stringify({ messages, agentId: currentAgent, gmailContext: gmailCache })
     });
 
     const bubble = replaceBubble(typingEl);
@@ -1393,7 +1410,7 @@ async function sendVoice(text) {
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, agentId: currentAgent })
+      body: JSON.stringify({ messages, agentId: currentAgent, gmailContext: gmailCache })
     });
     const bubble = replaceBubble(typingEl);
     const reader = res.body.getReader();
