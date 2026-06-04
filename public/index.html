@@ -687,6 +687,18 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
         <label>URL du serveur Axio</label>
         <input type="text" id="inp-serverurl" placeholder="https://axio-blush.vercel.app">
       </div>
+      <div class="form-group" style="margin-top:14px">
+        <label style="display:flex;justify-content:space-between;align-items:center">
+          Vitesse de la voix
+          <span id="voice-speed-label" style="color:var(--purple2);font-weight:600;font-size:13px">1.0x</span>
+        </label>
+        <input type="range" id="inp-voice-speed" min="0.5" max="2.5" step="0.1" value="1.0"
+          style="width:100%;accent-color:var(--purple);cursor:pointer;margin-top:6px"
+          oninput="document.getElementById('voice-speed-label').textContent=parseFloat(this.value).toFixed(1)+'x'">
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-top:4px">
+          <span>Lent 0.5x</span><span>Normal 1x</span><span>Rapide 2.5x</span>
+        </div>
+      </div>
     </div>
 
     <!-- Tab Email -->
@@ -763,6 +775,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 let apiKey    = localStorage.getItem('axio_apikey') || '';
 let serverUrl = localStorage.getItem('axio_server') || 'https://axio-blush.vercel.app';
 let userEmail = localStorage.getItem('axio_email') || '';
+let voiceSpeed = parseFloat(localStorage.getItem('axio_voice_speed') || '1.0');
 let currentAgent = 'operator';
 let messages = [];
 let isLoading = false;
@@ -1139,6 +1152,9 @@ function openSettings(tab) {
   inp_apikey.value = apiKey;
   inp_serverurl.value = serverUrl;
   document.getElementById('inp-email').value = userEmail;
+  const spSlider = document.getElementById('inp-voice-speed');
+  spSlider.value = voiceSpeed;
+  document.getElementById('voice-speed-label').textContent = voiceSpeed.toFixed(1) + 'x';
   overlay.classList.add('open');
   switchTab(tab || 'api', document.querySelector('.modal-tab'));
   setTimeout(() => inp_apikey.focus(), 120);
@@ -1151,6 +1167,8 @@ function saveSettings() {
   if (k) { apiKey = k; localStorage.setItem('axio_apikey', k); }
   if (s) { serverUrl = s; localStorage.setItem('axio_server', s); }
   if (e) { userEmail = e; localStorage.setItem('axio_email', e); }
+  const spd = parseFloat(document.getElementById('inp-voice-speed').value);
+  voiceSpeed = spd; localStorage.setItem('axio_voice_speed', spd);
   if (k || s) apiBanner.classList.add('hidden');
   closeSettings();
   checkStatus();
@@ -1365,7 +1383,7 @@ function speakVoice(text) {
   const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
   if (sentences.length > 2) clean = sentences.slice(0, 2).join(' ').trim();
   const utter = new SpeechSynthesisUtterance(clean);
-  utter.lang = 'fr-FR'; utter.rate = 2.0; utter.pitch = 0.95; utter.volume = 1;
+  utter.lang = 'fr-FR'; utter.rate = voiceSpeed; utter.pitch = 0.95; utter.volume = 1;
   const voices = window.speechSynthesis.getVoices();
   // Priorité : Google fr-FR > Google fr > Microsoft fr > autres fr
   const frVoice =
