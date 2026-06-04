@@ -1,0 +1,109 @@
+{
+  "name": "Axio — Réponse Email Auto",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+        }
+      },
+      "id": "trigger-poll",
+      "name": "Vérifier emails (15min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "filters": {
+          "q": "is:unread is:inbox -from:noreply -from:no-reply",
+          "maxResults": 5
+        },
+        "returnAll": false
+      },
+      "id": "get-emails",
+      "name": "Gmail — Emails non lus",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{ $json.id ? 1 : 0 }}", "operation": "larger", "value2": 0 }]
+        }
+      },
+      "id": "has-email",
+      "name": "Email trouvé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AXIO_SERVER_URL }}/webhook/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-webhook-secret", "value": "={{ $env.N8N_WEBHOOK_SECRET }}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "email_reply" },
+            { "name": "data", "value": "={{ JSON.stringify({ from: $json.from, subject: $json.subject, body: $json.text || $json.snippet, instruction: 'Rédige une réponse professionnelle et concise' }) }}" }
+          ]
+        }
+      },
+      "id": "axio-draft",
+      "name": "Axio — Rédiger réponse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "to": "={{ $env.GMAIL_USER }}",
+        "subject": "=[BROUILLON AXIO] Réponse à : {{ $('Gmail — Emails non lus').item.json.subject }}",
+        "emailType": "html",
+        "message": "=<div style='font-family:sans-serif;padding:20px'><div style='background:#f0ebff;border-left:4px solid #7c3aed;padding:12px 16px;border-radius:0 8px 8px 0;margin-bottom:20px'><strong style='color:#7c3aed'>📝 Brouillon Axio</strong><br><small style='color:#666'>À relire et envoyer si vous validez</small></div><div style='white-space:pre-wrap;line-height:1.8;color:#1a1a1a;font-size:14px'>{{ $json.result }}</div><hr style='margin:20px 0;border:none;border-top:1px solid #eee'><small style='color:#999'>Email original de : {{ $('Gmail — Emails non lus').item.json.from }}</small></div>"
+      },
+      "id": "save-draft",
+      "name": "Gmail — Sauvegarder brouillon",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1120, 200],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail — Emails non lus').item.json.id }}",
+        "labelIds": ["Label_2"]
+      },
+      "id": "mark-processed",
+      "name": "Gmail — Marquer traité",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1340, 200],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    }
+  ],
+  "connections": {
+    "Vérifier emails (15min)": { "main": [[{ "node": "Gmail — Emails non lus", "type": "main", "index": 0 }]] },
+    "Gmail — Emails non lus": { "main": [[{ "node": "Email trouvé ?", "type": "main", "index": 0 }]] },
+    "Email trouvé ?": { "main": [[{ "node": "Axio — Rédiger réponse", "type": "main", "index": 0 }], []] },
+    "Axio — Rédiger réponse": { "main": [[{ "node": "Gmail — Sauvegarder brouillon", "type": "main", "index": 0 }]] },
+    "Gmail — Sauvegarder brouillon": { "main": [[{ "node": "Gmail — Marquer traité", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "Axio" }]
+}

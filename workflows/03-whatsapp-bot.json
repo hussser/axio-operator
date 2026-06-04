@@ -1,0 +1,115 @@
+{
+  "name": "Axio — WhatsApp Bot",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "whatsapp-incoming",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook WhatsApp entrant",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "webhookId": "whatsapp-axio"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.type }}",
+              "operation": "equals",
+              "value2": "text"
+            }
+          ]
+        }
+      },
+      "id": "check-type",
+      "name": "Message texte ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const msg = $input.item.json.body.entry[0].changes[0].value.messages[0];\nconst contact = $input.item.json.body.entry[0].changes[0].value.contacts?.[0];\nreturn [{\n  json: {\n    phone: msg.from,\n    name: contact?.profile?.name || msg.from,\n    text: msg.text.body,\n    messageId: msg.id,\n    timestamp: msg.timestamp\n  }\n}];"
+      },
+      "id": "extract-msg",
+      "name": "Extraire message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"claude-sonnet-4-6\",\n  \"max_tokens\": 400,\n  \"system\": \"Tu es Axio, l'assistant IA de l'entrepreneur. Tu réponds via WhatsApp : sois très concis (2-3 phrases max), direct, professionnel. Pas de markdown. Toujours en français.\",\n  \"messages\": [{ \"role\": \"user\", \"content\": \"{{ $json.text }}\" }]\n}"
+      },
+      "id": "claude-call",
+      "name": "Claude — Générer réponse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v17.0/{{ $env.WHATSAPP_PHONE_ID }}/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.WHATSAPP_TOKEN }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $('Extraire message').item.json.phone }}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": \"{{ $json.content[0].text }}\" }\n}"
+      },
+      "id": "send-whatsapp",
+      "name": "WhatsApp — Envoyer réponse",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "OK"
+      },
+      "id": "respond-200",
+      "name": "Répondre 200 à Meta",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [680, 420]
+    }
+  ],
+  "connections": {
+    "Webhook WhatsApp entrant": { "main": [[{ "node": "Message texte ?", "type": "main", "index": 0 }]] },
+    "Message texte ?": {
+      "main": [
+        [{ "node": "Extraire message", "type": "main", "index": 0 }],
+        [{ "node": "Répondre 200 à Meta", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extraire message": { "main": [[{ "node": "Claude — Générer réponse", "type": "main", "index": 0 }]] },
+    "Claude — Générer réponse": { "main": [[{ "node": "WhatsApp — Envoyer réponse", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "Axio" }]
+}

@@ -1,0 +1,95 @@
+{
+  "name": "Axio — Brief RDV Auto",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 1 }]
+        }
+      },
+      "id": "trigger-cron",
+      "name": "Toutes les heures",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": "primary",
+        "timeMin": "={{ $now.toISO() }}",
+        "timeMax": "={{ $now.plus(2, 'hours').toISO() }}",
+        "singleEvents": true,
+        "orderBy": "startTime"
+      },
+      "id": "google-cal",
+      "name": "Google Calendar — RDV à venir",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": { "googleCalendarOAuth2Api": { "id": "1", "name": "Google Calendar" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [{ "value1": "={{ $json.items.length }}", "operation": "larger", "value2": 0 }]
+        }
+      },
+      "id": "check-events",
+      "name": "RDV trouvé ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AXIO_SERVER_URL }}/webhook/n8n",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-webhook-secret", "value": "={{ $env.N8N_WEBHOOK_SECRET }}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "brief_rdv" },
+            { "name": "data", "value": "={{ JSON.stringify({ title: $json.items[0].summary, datetime: $json.items[0].start.dateTime, attendees: $json.items[0].attendees?.map(a => a.email) || [], description: $json.items[0].description || '' }) }}" }
+          ]
+        }
+      },
+      "id": "axio-webhook",
+      "name": "Axio — Générer Brief",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.GMAIL_USER }}",
+        "toEmail": "={{ $env.GMAIL_USER }}",
+        "subject": "=📋 Brief RDV : {{ $json.items[0].summary }}",
+        "emailType": "html",
+        "message": "=<div style='font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px'><h2 style='color:#7c3aed'>Brief Axio — {{ $json.items[0].summary }}</h2><div style='white-space:pre-wrap;line-height:1.7;color:#1a1a1a'>{{ $('Axio — Générer Brief').item.json.result }}</div><hr style='margin:20px 0;border:none;border-top:1px solid #eee'><p style='color:#888;font-size:12px'>Généré par Axio AI Operator</p></div>"
+      },
+      "id": "send-email",
+      "name": "Gmail — Envoyer Brief",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1120, 200],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    }
+  ],
+  "connections": {
+    "Toutes les heures": { "main": [[{ "node": "Google Calendar — RDV à venir", "type": "main", "index": 0 }]] },
+    "Google Calendar — RDV à venir": { "main": [[{ "node": "RDV trouvé ?", "type": "main", "index": 0 }]] },
+    "RDV trouvé ?": { "main": [[{ "node": "Axio — Générer Brief", "type": "main", "index": 0 }], []] },
+    "Axio — Générer Brief": { "main": [[{ "node": "Gmail — Envoyer Brief", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "Axio" }]
+}

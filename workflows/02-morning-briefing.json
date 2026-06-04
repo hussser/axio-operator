@@ -1,0 +1,111 @@
+{
+  "name": "Axio — Briefing Matinal",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 7 * * 1-5" }]
+        }
+      },
+      "id": "trigger-morning",
+      "name": "7h du matin (lun-ven)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "event",
+        "operation": "getAll",
+        "calendar": "primary",
+        "timeMin": "={{ $now.startOf('day').toISO() }}",
+        "timeMax": "={{ $now.endOf('day').toISO() }}",
+        "singleEvents": true,
+        "orderBy": "startTime"
+      },
+      "id": "cal-today",
+      "name": "Agenda du jour",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [460, 200],
+      "credentials": { "googleCalendarOAuth2Api": { "id": "1", "name": "Google Calendar" } }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "getAll",
+        "filters": {
+          "q": "is:unread is:inbox",
+          "maxResults": 10
+        }
+      },
+      "id": "gmail-unread",
+      "name": "Emails non lus",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [460, 400],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineAll",
+        "options": {}
+      },
+      "id": "merge",
+      "name": "Fusionner données",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.AXIO_SERVER_URL }}/webhook/n8n",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "x-webhook-secret", "value": "={{ $env.N8N_WEBHOOK_SECRET }}" }]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "daily_summary" },
+            { "name": "data", "value": "={{ JSON.stringify({ events: $('Agenda du jour').all().map(i => ({ title: i.json.summary, time: i.json.start?.dateTime, attendees: i.json.attendees?.map(a=>a.email) })), emails: $('Emails non lus').all().slice(0,5).map(i => ({ from: i.json.from, subject: i.json.subject, snippet: i.json.snippet })), tasks: [] }) }}" }
+          ]
+        }
+      },
+      "id": "axio-summary",
+      "name": "Axio — Générer Briefing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "fromEmail": "={{ $env.GMAIL_USER }}",
+        "toEmail": "={{ $env.GMAIL_USER }}",
+        "subject": "=🌅 Briefing Axio — {{ $now.toFormat('EEEE d MMMM') }}",
+        "emailType": "html",
+        "message": "=<div style='font-family:sans-serif;max-width:640px;margin:0 auto;padding:28px;background:#f9f9ff'><div style='background:linear-gradient(135deg,#7c3aed,#a78bfa);padding:20px 24px;border-radius:12px;color:white;margin-bottom:24px'><h1 style='margin:0;font-size:22px'>☀️ Bonne journée !</h1><p style='margin:6px 0 0;opacity:.85;font-size:14px'>Votre briefing du {{ $now.toFormat('EEEE d MMMM yyyy') }}</p></div><div style='background:white;border-radius:12px;padding:24px;white-space:pre-wrap;line-height:1.8;color:#1a1a1a;font-size:14px'>{{ $json.result }}</div><div style='margin-top:16px;padding:12px;background:#f0ebff;border-radius:8px;font-size:12px;color:#7c3aed;text-align:center'>Généré par Axio AI Operator · axio-web.com</div></div>"
+      },
+      "id": "send-briefing",
+      "name": "Gmail — Envoyer Briefing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [1120, 300],
+      "credentials": { "gmailOAuth2": { "id": "2", "name": "Gmail" } }
+    }
+  ],
+  "connections": {
+    "7h du matin (lun-ven)": { "main": [[{ "node": "Agenda du jour", "type": "main", "index": 0 }, { "node": "Emails non lus", "type": "main", "index": 0 }]] },
+    "Agenda du jour": { "main": [[{ "node": "Fusionner données", "type": "main", "index": 0 }]] },
+    "Emails non lus": { "main": [[{ "node": "Fusionner données", "type": "main", "index": 1 }]] },
+    "Fusionner données": { "main": [[{ "node": "Axio — Générer Briefing", "type": "main", "index": 0 }]] },
+    "Axio — Générer Briefing": { "main": [[{ "node": "Gmail — Envoyer Briefing", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": [{ "name": "Axio" }]
+}
