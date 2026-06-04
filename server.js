@@ -195,106 +195,61 @@ GOOGLE_REFRESH_TOKEN=${tokens.refresh_token || '⚠️ null — relancez /auth/g
   }
 });
 
-// ─── Gmail : lire les emails ─────────────────────────────────────────────────
-app.get('/api/gmail/inbox', async (req, res) => {
-  if (!process.env.GOOGLE_REFRESH_TOKEN) {
-    return res.status(400).json({ error: 'Gmail non connecté. Allez sur /auth/google pour connecter.' });
-  }
-  try {
-    const auth = getGmailClient();
-    const gmail = google.gmail({ version: 'v1', auth });
-    const maxResults = parseInt(req.query.max) || 10;
-
-    const list = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults,
-      q: 'in:inbox -category:promotions -category:social'
-    });
-
-    if (!list.data.messages?.length) return res.json({ emails: [] });
-
-    const emails = await Promise.all(
-      list.data.messages.map(async (m) => {
-        const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata',
-          metadataHeaders: ['From', 'Subject', 'Date'] });
-        const headers = msg.data.payload.headers;
-        const get = (name) => headers.find(h => h.name === name)?.value || '';
-        const snippet = msg.data.snippet || '';
-        return {
-          id: m.id,
-          from: get('From'),
-          subject: get('Subject'),
-          date: get('Date'),
-          snippet: snippet.substring(0, 200)
-        };
-      })
-    );
-
-    res.json({ emails });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Gmail : envoyer un email ────────────────────────────────────────────────
+// ─── Gmail : envoyer un email (via n8n) ────────────────────────────────────
 app.post('/api/send-email', async (req, res) => {
   const { to, subject, body } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'Champs manquants' });
 
-  if (!process.env.GOOGLE_REFRESH_TOKEN) {
-    return res.status(400).json({
-      error: 'Gmail non connecté. Connectez votre compte sur /auth/google'
-    });
-  }
+  const n8nUrl = process.env.N8N_SEND_EMAIL_URL;
+  if (!n8nUrl) return res.status(400).json({ error: 'Gmail non configuré.' });
 
   try {
-    const auth = getGmailClient();
-    const gmail = google.gmail({ version: 'v1', auth });
-
-    const from = process.env.GMAIL_USER || 'me';
-    const raw = Buffer.from(
-      `From: Axio <${from}>\r\nTo: ${to}\r\nSubject: ${subject}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n${body}`
-    ).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-    await gmail.users.messages.send({ userId: 'me', requestBody: { raw } });
-    res.json({ success: true, method: 'gmail' });
+    const r = await fetch(n8nUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, body })
+    });
+    const text = await r.text();
+    let data;
+    try { data = JSON.parse(text); } catch { data = {}; }
+    if (!r.ok) return res.status(500).json({ error: data.message || `Erreur n8n ${r.status}` });
+    res.json({ success: true, method: 'n8n-gmail' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Résumé IA des emails ────────────────────────────────────────────────────
+// ─── Gmail : lire et résumer les emails (via n8n) ───────────────────────────
 app.post('/api/gmail/summarize', async (req, res) => {
-  if (!process.env.GOOGLE_REFRESH_TOKEN) {
-    return res.status(400).json({ error: 'Gmail non connecté.' });
-  }
+  const n8nUrl = process.env.N8N_READ_EMAIL_URL;
+  if (!n8nUrl) return res.status(400).json({ error: 'Gmail non configuré.' });
+
   try {
-    const auth = getGmailClient();
-    const gmail = google.gmail({ version: 'v1', auth });
+    const r = await fetch(n8nUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxResults: 15 })
+    });
+    const emails = await r.json();
 
-    const list = await gmail.users.messages.list({ userId: 'me', maxResults: 15,
-      q: 'in:inbox -category:promotions -category:social is:unread' });
-
-    if (!list.data.messages?.length) {
-      return res.json({ summary: 'Aucun email non lu dans votre boîte de réception.' });
+    if (!emails || (Array.isArray(emails) && emails.length === 0)) {
+      return res.json({ summary: 'Aucun email non lu dans votre boîte de réception.', count: 0 });
     }
 
-    const emails = await Promise.all(
-      list.data.messages.map(async (m) => {
-        const msg = await gmail.users.messages.get({ userId: 'me', id: m.id, format: 'metadata',
-          metadataHeaders: ['From', 'Subject', 'Date'] });
-        const headers = msg.data.payload.headers;
-        const get = (name) => headers.find(h => h.name === name)?.value || '';
-        return `De: ${get('From')} | Objet: ${get('Subject')} | ${msg.data.snippet?.substring(0,150)}`;
-      })
-    );
+    const emailList = Array.isArray(emails) ? emails : [emails];
+    const lines = emailList.map(e => {
+      const from = e.from || e.From || '';
+      const subject = e.subject || e.Subject || '';
+      const snippet = e.snippet || e.body || '';
+      return `De: ${from} | Objet: ${subject} | ${String(snippet).substring(0, 150)}`;
+    });
 
     const summary = await callAI(
       'Tu es Axio. Résume ces emails de façon concise et actionnable. Identifie ce qui est urgent. Réponds en français.',
-      `Voici les emails non lus :\n\n${emails.join('\n\n')}`
+      `Voici les emails non lus :\n\n${lines.join('\n\n')}`
     );
 
-    res.json({ summary, count: emails.length });
+    res.json({ summary, count: emailList.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
