@@ -198,6 +198,39 @@ GOOGLE_REFRESH_TOKEN=${tokens.refresh_token || '⚠️ null — relancez /auth/g
   }
 });
 
+// ─── Gmail : liste brute des emails (pour affichage UI) ─────────────────────
+app.get('/api/gmail/inbox', async (req, res) => {
+  const n8nUrl = process.env.N8N_READ_EMAIL_URL;
+  if (!n8nUrl) return res.status(400).json({ emails: [] });
+  try {
+    const r = await fetch(n8nUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ maxResults: 20 })
+    });
+    const data = await r.json();
+    const list = Array.isArray(data) ? data : [data];
+    const since24h = Date.now() - 24 * 60 * 60 * 1000;
+    const emails = list
+      .filter(e => parseInt(e.internalDate || '0') > since24h)
+      .map(e => ({
+        id: e.id,
+        from: e.From || e.from || '',
+        subject: e.Subject || e.subject || '(sans objet)',
+        snippet: (e.snippet || '').substring(0, 120),
+        date: e.internalDate ? new Date(parseInt(e.internalDate)).toISOString() : ''
+      }));
+    res.json({ emails: emails.length > 0 ? emails : list.slice(0,10).map(e => ({
+      from: e.From || e.from || '',
+      subject: e.Subject || e.subject || '',
+      snippet: (e.snippet || '').substring(0, 120),
+      date: e.internalDate ? new Date(parseInt(e.internalDate)).toISOString() : ''
+    }))});
+  } catch (err) {
+    res.status(500).json({ emails: [], error: err.message });
+  }
+});
+
 // ─── Gmail : envoyer un email (via n8n) ────────────────────────────────────
 app.post('/api/send-email', async (req, res) => {
   const { to, subject, body } = req.body;

@@ -904,14 +904,85 @@ function newConv() {
   emptyState.style.display = '';
 }
 
-// ── Détection commandes Gmail ───────────────────────────────────────────────
-// Détecte toute mention de mails (lecture OU connexion OU analyse)
+// ── Gmail ──────────────────────────────────────────────────────────────────
 function isReadEmailQuery(text) {
   const t = text.toLowerCase();
-  // N'importe quelle mention mail/email sauf si c'est clairement un envoi
-  const isSend = /\b(envoie|envoyer|envo|send|écris|redige|rédige|prépare)\b/.test(t);
-  const hasEmailWord = /\b(mail|email|courrier|boite|boîte|inbox|message|reçu|connecte.{0,15}mail)\b/.test(t);
-  return hasEmailWord && !isSend;
+  const isSend = /\b(envoie|envoyer|envo|send|écris|rédige|redige|prépare)\b/.test(t);
+  const hasEmail = /\b(mail|email|courrier|boite|boîte|inbox|reçu|messages?)\b/.test(t);
+  return hasEmail && !isSend;
+}
+
+// Affiche les emails directement en carte UI — sans passer par le modèle IA
+async function showEmailsDirectly() {
+  const wrap = document.createElement('div');
+  wrap.className = 'msg ai-msg';
+  wrap.innerHTML = `<div class="avatar">A</div><div class="bubble" style="padding:0;overflow:hidden;min-width:320px;max-width:480px">
+    <div style="padding:14px 16px 10px;border-bottom:1px solid rgba(255,255,255,0.07);display:flex;align-items:center;gap:8px">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+      <span style="font-weight:600;font-size:13px;color:#e2e8f0">Boîte de réception</span>
+      <span id="email-card-count" style="font-size:11px;color:var(--muted);margin-left:auto">Chargement…</span>
+    </div>
+    <div id="email-card-list" style="max-height:340px;overflow-y:auto"></div>
+  </div>`;
+  chatArea.appendChild(wrap);
+  emptyState.style.display = 'none';
+  scroll();
+
+  try {
+    const r = await fetch(`${serverUrl}/api/gmail/summarize`, { method: 'POST' });
+    const d = await r.json();
+    if (d.error) {
+      document.getElementById('email-card-list').innerHTML = `<div style="padding:16px;color:#f87171;font-size:13px">Impossible de charger les emails. Vérifiez la connexion Gmail dans les paramètres.</div>`;
+      document.getElementById('email-card-count').textContent = '';
+      return d;
+    }
+
+    // Récupérer les emails bruts pour afficher proprement
+    const raw = await fetch(`${serverUrl}/api/gmail/inbox`).then(r=>r.json()).catch(()=>({emails:[]}));
+    const emails = raw.emails || [];
+
+    document.getElementById('email-card-count').textContent = `${d.count} non lu(s) · 24h`;
+    const list = document.getElementById('email-card-list');
+
+    if (emails.length === 0) {
+      list.innerHTML = `<div style="padding:16px;color:var(--muted);font-size:13px">Aucun email non lu.</div>`;
+    } else {
+      list.innerHTML = emails.slice(0,10).map(e => {
+        const name = (e.from||'').replace(/<.*>/, '').replace(/"/g,'').trim() || e.from;
+        const initial = name.charAt(0).toUpperCase();
+        const subj = e.subject || '(sans objet)';
+        const snip = (e.snippet||'').substring(0,80);
+        const time = e.date ? new Date(e.date).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '';
+        const colors = ['#8b5cf6','#06b6d4','#10b981','#f59e0b','#ef4444','#ec4899'];
+        const color = colors[initial.charCodeAt(0)%colors.length];
+        return `<div style="display:flex;gap:12px;padding:12px 16px;border-bottom:1px solid rgba(255,255,255,0.05);cursor:default" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background=''">
+          <div style="width:36px;height:36px;border-radius:50%;background:${color}22;border:1px solid ${color}55;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;color:${color};flex-shrink:0">${initial}</div>
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+              <span style="font-size:13px;font-weight:600;color:#e2e8f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px">${name}</span>
+              <span style="font-size:11px;color:var(--muted);flex-shrink:0;margin-left:8px">${time}</span>
+            </div>
+            <div style="font-size:12px;color:#a0aec0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${subj}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${snip}</div>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // Aussi ajouter le résumé IA comme message texte
+    messages.push({role:'assistant', content: d.summary});
+    const aiWrap = document.createElement('div');
+    aiWrap.className = 'msg ai-msg';
+    aiWrap.innerHTML = `<div class="avatar">A</div><div class="bubble">${md(d.summary)}</div>`;
+    chatArea.appendChild(aiWrap);
+    scroll();
+    if (voiceMode) speakVoice(d.summary);
+
+    return d;
+  } catch(e) {
+    document.getElementById('email-card-list').innerHTML = `<div style="padding:16px;color:#f87171;font-size:13px">Erreur réseau : ${e.message}</div>`;
+    return null;
+  }
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────
@@ -926,40 +997,22 @@ async function send() {
   userInput.value = '';
   userInput.style.height = 'auto';
 
+  // Lecture emails : affiche directement en carte UI, bypass IA
+  if (serverUrl && isReadEmailQuery(text)) {
+    isLoading = true; sendBtn.disabled = true;
+    await showEmailsDirectly();
+    isLoading = false; sendBtn.disabled = false;
+    return;
+  }
+
   const typingEl = addTyping();
   isLoading = true;
   sendBtn.disabled = true;
-
-  // Injecter le contexte Gmail uniquement pour les demandes de LECTURE
-  if (serverUrl && isReadEmailQuery(text)) {
-    await injectGmailContext(typingEl);
-    return;
-  }
 
   if (serverUrl) {
     await streamFromServer(typingEl);
   } else {
     await streamDirect(typingEl);
-  }
-}
-
-async function injectGmailContext(typingEl) {
-  try {
-    const r = await fetch(`${serverUrl}/api/gmail/summarize`, { method: 'POST' });
-    const d = await r.json();
-    if (d.error) {
-      typingEl.remove();
-      addMsg('ai', `Je ne peux pas accéder à Gmail pour le moment. Vérifiez la connexion dans les paramètres (⚙️ → Email → Connecter Gmail).`);
-      isLoading = false; sendBtn.disabled = false;
-      return;
-    }
-    // Injecter le résumé dans le contexte pour que l'IA réponde dessus
-    const lastUserMsg = messages[messages.length - 1];
-    lastUserMsg.content = `${lastUserMsg.content}\n\n[EMAILS NON LUS ${d.period || ''} — ${d.count} email(s)] :\n${d.summary}`;
-    await streamFromServer(typingEl);
-  } catch (e) {
-    // En cas d'erreur réseau, on laisse l'IA répondre normalement
-    await streamFromServer(typingEl);
   }
 }
 
@@ -1325,16 +1378,13 @@ async function sendVoice(text) {
   const typingEl = addTyping();
   isLoading = true;
 
-  // Injecter le contexte Gmail en mode vocal aussi
+  // Lecture emails en mode vocal : carte UI directe
   if (serverUrl && isReadEmailQuery(text)) {
-    try {
-      const r = await fetch(`${serverUrl}/api/gmail/summarize`, { method: 'POST' });
-      const d = await r.json();
-      if (!d.error && d.summary) {
-        const last = messages[messages.length - 1];
-        last.content = `${last.content}\n\n[EMAILS ${d.period || ''} — ${d.count}] :\n${d.summary}`;
-      }
-    } catch(e) {}
+    isLoading = false;
+    await showEmailsDirectly();
+    isLoading = false;
+    if (voiceMode && !isSpeaking) setTimeout(startVoiceListening, 800);
+    return;
   }
 
   const url = serverUrl + '/api/chat';
