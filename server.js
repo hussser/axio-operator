@@ -216,7 +216,8 @@ app.get('/api/status', (req, res) => {
     agents: Object.keys(AGENTS),
     integrations: {
       claude: !!process.env.ANTHROPIC_API_KEY,
-      google: !!process.env.GOOGLE_CLIENT_ID,
+      google: !!process.env.GOOGLE_CLIENT_ID || !!process.env.N8N_WEBHOOK_SECRET,
+      gmail: !!process.env.GMAIL_USER || !!process.env.N8N_WEBHOOK_SECRET,
       whatsapp: !!process.env.WHATSAPP_TOKEN,
       notion: !!process.env.NOTION_TOKEN
     }
