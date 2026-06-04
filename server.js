@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const nodemailer = require('nodemailer');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -267,27 +268,45 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// ─── Envoi d'email via n8n/Gmail ───────────────────────────────────────────
+// ─── Envoi d'email via SMTP (Gmail App Password) ──────────────────────────
 app.post('/api/send-email', async (req, res) => {
   const { to, subject, body } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'Champs manquants' });
 
-  try {
-    // Via n8n webhook si configuré
-    if (process.env.N8N_WEBHOOK_SECRET && process.env.N8N_SEND_EMAIL_URL) {
+  // Via n8n si configuré
+  if (process.env.N8N_SEND_EMAIL_URL) {
+    try {
       await fetch(process.env.N8N_SEND_EMAIL_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET },
+        headers: { 'Content-Type': 'application/json', 'x-webhook-secret': process.env.N8N_WEBHOOK_SECRET || '' },
         body: JSON.stringify({ to, subject, body })
       });
       return res.json({ success: true, method: 'n8n' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
-
-    // Fallback: générer le contenu de l'email (sans envoi si pas de config)
-    res.json({ success: true, method: 'preview', message: 'Email généré (configurez N8N_SEND_EMAIL_URL pour l\'envoi automatique)' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
+
+  // Via Gmail SMTP (App Password)
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD }
+      });
+      await transporter.sendMail({
+        from: `"Axio" <${process.env.GMAIL_USER}>`,
+        to, subject,
+        text: body,
+        html: body.replace(/\n/g, '<br>')
+      });
+      return res.json({ success: true, method: 'gmail' });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  }
+
+  res.status(400).json({ error: 'Email non configuré. Ajoutez GMAIL_USER et GMAIL_APP_PASSWORD dans les variables d\'environnement Vercel.' });
 });
 
 app.listen(PORT, () => {

@@ -1249,9 +1249,16 @@ function speakVoice(text) {
   window.speechSynthesis.cancel();
   const clean = text.replace(/```[\s\S]*?```/g,'').replace(/[*_#`~]/g,'').replace(/\n+/g,' ').trim();
   const utter = new SpeechSynthesisUtterance(clean);
-  utter.lang = 'fr-FR'; utter.rate = 1.05; utter.pitch = 1;
+  utter.lang = 'fr-FR'; utter.rate = 1.0; utter.pitch = 0.95; utter.volume = 1;
   const voices = window.speechSynthesis.getVoices();
-  const frVoice = voices.find(v => v.lang.startsWith('fr') && !v.name.includes('Google')) || voices.find(v => v.lang.startsWith('fr'));
+  // Priorité : Google fr-FR > Google fr > Microsoft fr > autres fr
+  const frVoice =
+    voices.find(v => v.name === 'Google français') ||
+    voices.find(v => v.name.includes('Google') && v.lang === 'fr-FR') ||
+    voices.find(v => v.name.includes('Google') && v.lang.startsWith('fr')) ||
+    voices.find(v => v.name.includes('Microsoft') && v.lang.startsWith('fr')) ||
+    voices.find(v => v.lang === 'fr-FR') ||
+    voices.find(v => v.lang.startsWith('fr'));
   if (frVoice) utter.voice = frVoice;
   isSpeaking = true;
   setVoiceState('speaking');
