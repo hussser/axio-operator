@@ -892,13 +892,13 @@ function newConv() {
 }
 
 // ── Détection commandes Gmail ───────────────────────────────────────────────
-// Détecte uniquement les demandes de LECTURE d'emails (pas envoi)
+// Détecte toute mention de mails (lecture OU connexion OU analyse)
 function isReadEmailQuery(text) {
   const t = text.toLowerCase();
-  // Doit contenir un mot de lecture/analyse ET un mot lié aux emails
-  const readWords = /\b(lire|lis|vu|voir|montre|affiche|résume|resume|analyse|analyser|quels?|qu['']est.ce|check|reçu|boite|boîte|inbox|non.?lu|unread|rapport|bilan)\b/;
-  const emailWords = /\b(mail|email|courrier|message|inbox)\b/;
-  return readWords.test(t) && emailWords.test(t);
+  // N'importe quelle mention mail/email sauf si c'est clairement un envoi
+  const isSend = /\b(envoie|envoyer|envo|send|écris|redige|rédige|prépare)\b/.test(t);
+  const hasEmailWord = /\b(mail|email|courrier|boite|boîte|inbox|message|reçu|connecte.{0,15}mail)\b/.test(t);
+  return hasEmailWord && !isSend;
 }
 
 // ── Send ───────────────────────────────────────────────────────────────────
@@ -1297,17 +1297,27 @@ function toggleVoiceMode() {
 }
 
 async function sendVoice(text) {
-  // Affiche le transcript final
   document.getElementById('voiceTranscript').textContent = '"' + text + '"';
   document.getElementById('voiceResponse').textContent = '';
 
-  // Ajoute aussi dans le chat normal
   emptyState.style.display = 'none';
   addMsg('user', text);
   messages.push({ role: 'user', content: text });
 
   const typingEl = addTyping();
   isLoading = true;
+
+  // Injecter le contexte Gmail en mode vocal aussi
+  if (serverUrl && isReadEmailQuery(text)) {
+    try {
+      const r = await fetch(`${serverUrl}/api/gmail/summarize`, { method: 'POST' });
+      const d = await r.json();
+      if (!d.error && d.summary) {
+        const last = messages[messages.length - 1];
+        last.content = `${last.content}\n\n[EMAILS ${d.period || ''} — ${d.count}] :\n${d.summary}`;
+      }
+    } catch(e) {}
+  }
 
   const url = serverUrl + '/api/chat';
   let full = '';
@@ -1355,7 +1365,7 @@ function speakVoice(text) {
   const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
   if (sentences.length > 2) clean = sentences.slice(0, 2).join(' ').trim();
   const utter = new SpeechSynthesisUtterance(clean);
-  utter.lang = 'fr-FR'; utter.rate = 1.0; utter.pitch = 0.95; utter.volume = 1;
+  utter.lang = 'fr-FR'; utter.rate = 2.0; utter.pitch = 0.95; utter.volume = 1;
   const voices = window.speechSynthesis.getVoices();
   // Priorité : Google fr-FR > Google fr > Microsoft fr > autres fr
   const frVoice =
