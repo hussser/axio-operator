@@ -29,10 +29,101 @@
 }
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'DM Sans', sans-serif; overflow: hidden; }
 
-/* ── Voice mode ── */
-#voiceBtn.on { color: var(--purple2); background: var(--purple-bg); border-color: var(--purple-border); animation: mic-pulse 1.2s ease-in-out infinite; }
-@keyframes mic-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(139,92,246,0.4)} 50%{box-shadow:0 0 0 8px rgba(139,92,246,0)} }
+/* ── Voice mode button ── */
+#voiceBtn.on { color: var(--purple2); background: var(--purple-bg); border-color: var(--purple-border); }
 #micBtn.on { color: var(--purple2); background: var(--purple-bg); }
+
+/* ── Voice Overlay (plein écran Alexa) ── */
+.voice-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #04040c;
+  transition: opacity .3s; opacity: 1;
+}
+.voice-overlay.hidden { display: none; }
+.voice-bg {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(109,40,217,0.18) 0%, rgba(88,28,235,0.06) 50%, transparent 75%);
+}
+.voice-close {
+  position: absolute; top: 20px; right: 20px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 50%; width: 44px; height: 44px; display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.6); cursor: pointer; transition: background .2s;
+}
+.voice-close:hover { background: rgba(255,255,255,0.12); color: #fff; }
+.voice-logo {
+  position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+  font-size: 18px; font-weight: 700; letter-spacing: .08em;
+  background: linear-gradient(135deg, #a78bfa, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.voice-orb-wrap {
+  position: relative; width: 220px; height: 220px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 36px;
+}
+.voice-orb {
+  position: relative; width: 130px; height: 130px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+}
+.voice-orb-inner {
+  width: 130px; height: 130px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #a78bfa, #6d28d9 55%, #3b1a8a);
+  box-shadow: 0 0 40px rgba(139,92,246,0.5), 0 0 80px rgba(109,40,217,0.25);
+  transition: transform .3s, box-shadow .3s;
+}
+.voice-orb-ring {
+  position: absolute; border-radius: 50%; border: 1.5px solid rgba(139,92,246,0.25);
+  animation: ring-pulse 3s ease-in-out infinite;
+}
+.r1 { width: 160px; height: 160px; animation-delay: 0s; }
+.r2 { width: 190px; height: 190px; animation-delay: .6s; }
+.r3 { width: 220px; height: 220px; animation-delay: 1.2s; }
+@keyframes ring-pulse { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:.1;transform:scale(1.04)} }
+
+/* États de l'orbe */
+.voice-overlay.listening .voice-orb-inner {
+  animation: orb-listen 0.8s ease-in-out infinite alternate;
+  box-shadow: 0 0 60px rgba(139,92,246,0.8), 0 0 120px rgba(109,40,217,0.4);
+}
+@keyframes orb-listen { from{transform:scale(1)} to{transform:scale(1.12)} }
+
+.voice-overlay.speaking .voice-orb-inner {
+  animation: orb-speak 0.5s ease-in-out infinite alternate;
+  background: radial-gradient(circle at 35% 35%, #c4b5fd, #8b5cf6 55%, #4c1d95);
+  box-shadow: 0 0 70px rgba(167,139,250,0.9), 0 0 140px rgba(139,92,246,0.5);
+}
+@keyframes orb-speak { from{transform:scale(1.0)} to{transform:scale(1.08)} }
+
+.voice-overlay.thinking .voice-orb-inner {
+  animation: orb-think 1.5s ease-in-out infinite;
+}
+@keyframes orb-think { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(0.95);opacity:.7} }
+
+.voice-status {
+  font-size: 14px; color: rgba(167,139,250,0.7); letter-spacing: .06em;
+  text-transform: uppercase; font-weight: 500; margin-bottom: 16px; height: 20px;
+}
+.voice-transcript {
+  font-size: 18px; color: rgba(238,234,248,0.5); text-align: center;
+  max-width: 560px; min-height: 28px; padding: 0 20px; font-style: italic;
+  transition: opacity .3s;
+}
+.voice-response {
+  font-size: 17px; color: var(--text); text-align: center; line-height: 1.65;
+  max-width: 600px; min-height: 56px; padding: 16px 24px 0;
+  font-weight: 400;
+}
+.voice-mic-btn {
+  margin-top: 40px; width: 68px; height: 68px; border-radius: 50%;
+  background: rgba(139,92,246,0.15); border: 2px solid rgba(139,92,246,0.4);
+  color: var(--purple2); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .2s, border-color .2s, transform .15s;
+}
+.voice-mic-btn:hover { background: rgba(139,92,246,0.25); transform: scale(1.05); }
+.voice-mic-btn.active { background: var(--purple); border-color: var(--purple); color: #fff; }
+.voice-mic-btn.muted { opacity: .35; cursor: default; }
 
 /* ── Email card ── */
 .email-card { background: rgba(139,92,246,0.08); border: 1px solid var(--purple-border); border-radius: 12px; padding: 14px 16px; margin: 8px 0 8px 44px; max-width: 520px; }
@@ -551,6 +642,29 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   </div>
 </div>
 
+<!-- Voice Mode Overlay -->
+<div id="voiceOverlay" class="voice-overlay hidden">
+  <div class="voice-bg"></div>
+  <button class="voice-close" id="voiceClose" title="Quitter">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="22" height="22"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+  </button>
+  <div class="voice-logo">Axio</div>
+  <div class="voice-orb-wrap">
+    <div class="voice-orb" id="voiceOrb">
+      <div class="voice-orb-inner"></div>
+      <div class="voice-orb-ring r1"></div>
+      <div class="voice-orb-ring r2"></div>
+      <div class="voice-orb-ring r3"></div>
+    </div>
+  </div>
+  <div class="voice-status" id="voiceStatus">Appuyez pour parler</div>
+  <div class="voice-transcript" id="voiceTranscript"></div>
+  <div class="voice-response" id="voiceResponse"></div>
+  <button class="voice-mic-btn" id="voiceMicBtn">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="28" height="28"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+  </button>
+</div>
+
 <!-- Settings Modal -->
 <div class="overlay" id="overlay">
   <div class="modal">
@@ -657,6 +771,11 @@ function init() {
   toggleSidebar.addEventListener('click', () => sidebar.classList.toggle('collapsed'));
   micBtn.addEventListener('click', toggleMic);
   voiceBtn.addEventListener('click', toggleVoiceMode);
+  document.getElementById('voiceClose').addEventListener('click', closeVoiceMode);
+  document.getElementById('voiceMicBtn').addEventListener('click', () => {
+    if (voiceState === 'idle') startVoiceListening();
+    else if (voiceState === 'listening') { try { recognition.stop(); } catch(e){} isListening = false; setVoiceState('idle'); }
+  });
   // Charger les voix TTS
   window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
   initSpeech();
@@ -961,10 +1080,66 @@ function switchTab(id, el) {
 // ── Speech & Voice Mode ────────────────────────────────────────────────────
 let voiceMode = false;
 let isSpeaking = false;
+let voiceState = 'idle'; // idle | listening | thinking | speaking
+
+function setVoiceState(state) {
+  voiceState = state;
+  const vo = document.getElementById('voiceOverlay');
+  const st = document.getElementById('voiceStatus');
+  const mb = document.getElementById('voiceMicBtn');
+  if (!vo) return;
+  vo.classList.remove('listening','thinking','speaking');
+  mb.classList.remove('active','muted');
+  if (state === 'listening') {
+    vo.classList.add('listening');
+    mb.classList.add('active');
+    st.textContent = 'Je vous écoute…';
+  } else if (state === 'thinking') {
+    vo.classList.add('thinking');
+    mb.classList.add('muted');
+    st.textContent = 'Axio réfléchit…';
+  } else if (state === 'speaking') {
+    vo.classList.add('speaking');
+    mb.classList.add('muted');
+    st.textContent = 'Axio parle…';
+  } else {
+    st.textContent = 'Appuyez pour parler';
+  }
+}
+
+function openVoiceMode() {
+  voiceMode = true;
+  voiceBtn.classList.add('on');
+  document.getElementById('voiceOverlay').classList.remove('hidden');
+  document.getElementById('voiceTranscript').textContent = '';
+  document.getElementById('voiceResponse').textContent = '';
+  setVoiceState('idle');
+  setTimeout(startVoiceListening, 400);
+}
+
+function closeVoiceMode() {
+  voiceMode = false;
+  voiceBtn.classList.remove('on');
+  document.getElementById('voiceOverlay').classList.add('hidden');
+  window.speechSynthesis.cancel();
+  if (recognition) try { recognition.stop(); } catch(e){}
+  isListening = false;
+  isSpeaking = false;
+  setVoiceState('idle');
+}
+
+function startVoiceListening() {
+  if (!recognition || isListening || isSpeaking) return;
+  try {
+    recognition.start();
+    isListening = true;
+    setVoiceState('listening');
+  } catch(e) {}
+}
 
 function initSpeech() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { micBtn.style.display = 'none'; voiceBtn.style.display = 'none'; return; }
+  if (!SR) { micBtn.style.display='none'; voiceBtn.style.display='none'; return; }
   recognition = new SR();
   recognition.lang = 'fr-FR';
   recognition.continuous = false;
@@ -972,76 +1147,130 @@ function initSpeech() {
 
   recognition.onresult = e => {
     const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
-    userInput.value = transcript;
-    autoResize();
-    // En mode vocal : envoyer automatiquement quand la phrase est finale
-    if (voiceMode && e.results[e.results.length - 1].isFinal) {
-      setTimeout(() => { if (userInput.value.trim()) send(); }, 300);
+    if (voiceMode) {
+      document.getElementById('voiceTranscript').textContent = transcript;
+    } else {
+      userInput.value = transcript;
+      autoResize();
+    }
+    if (e.results[e.results.length - 1].isFinal && transcript.trim()) {
+      if (voiceMode) {
+        isListening = false;
+        setVoiceState('thinking');
+        sendVoice(transcript.trim());
+      } else {
+        setTimeout(() => { if (userInput.value.trim()) send(); }, 200);
+      }
     }
   };
 
   recognition.onend = () => {
     isListening = false;
     micBtn.classList.remove('on');
-    // En mode vocal : relancer l'écoute après réponse
-    if (voiceMode && !isSpeaking && !isLoading) {
-      setTimeout(startListening, 600);
+    if (voiceMode && voiceState === 'listening') {
+      // Réécouter si rien dit
+      setTimeout(startVoiceListening, 500);
     }
   };
-  recognition.onerror = () => { isListening = false; micBtn.classList.remove('on'); };
-}
-
-function startListening() {
-  if (!recognition || isListening) return;
-  try {
-    recognition.start();
-    isListening = true;
-    micBtn.classList.add('on');
-    userInput.placeholder = '🎤 Je vous écoute…';
-  } catch(e) {}
+  recognition.onerror = (e) => {
+    isListening = false;
+    micBtn.classList.remove('on');
+    if (voiceMode && e.error !== 'aborted') {
+      setVoiceState('idle');
+      setTimeout(startVoiceListening, 1000);
+    }
+  };
 }
 
 function toggleMic() {
   if (!recognition) return;
-  if (isListening) { recognition.stop(); userInput.placeholder = 'Dites-moi ce dont vous avez besoin…'; }
-  else startListening();
+  if (isListening) { recognition.stop(); userInput.placeholder='Dites-moi ce dont vous avez besoin…'; }
+  else { recognition.start(); isListening=true; micBtn.classList.add('on'); userInput.placeholder='🎤 Je vous écoute…'; }
 }
 
 function toggleVoiceMode() {
-  voiceMode = !voiceMode;
-  voiceBtn.classList.toggle('on', voiceMode);
-  if (voiceMode) {
-    voiceBtn.title = 'Mode vocal actif — cliquez pour désactiver';
-    addMsg('ai', '🎤 **Mode vocal activé.** Je vous écoute — parlez et je répondrai à voix haute.');
-    startListening();
-  } else {
-    voiceBtn.title = 'Mode vocal Alexa';
-    window.speechSynthesis.cancel();
-    recognition.stop();
-    userInput.placeholder = 'Dites-moi ce dont vous avez besoin…';
+  if (voiceMode) closeVoiceMode();
+  else openVoiceMode();
+}
+
+async function sendVoice(text) {
+  // Affiche le transcript final
+  document.getElementById('voiceTranscript').textContent = '"' + text + '"';
+  document.getElementById('voiceResponse').textContent = '';
+
+  // Ajoute aussi dans le chat normal
+  emptyState.style.display = 'none';
+  addMsg('user', text);
+  messages.push({ role: 'user', content: text });
+
+  const typingEl = addTyping();
+  isLoading = true;
+
+  const url = serverUrl + '/api/chat';
+  let full = '';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages, agentId: currentAgent })
+    });
+    const bubble = replaceBubble(typingEl);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split('\n'); buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const d = line.slice(6).trim();
+        if (d === '[DONE]') break;
+        try { const j = JSON.parse(d); if (j.text) { full += j.text; bubble.innerHTML = md(full); scroll(); } } catch {}
+      }
+    }
+    messages.push({ role: 'assistant', content: full });
+    const emailData = detectEmailAction(full);
+    if (emailData) { bubble.innerHTML = md(full.replace(/AXIO_EMAIL:[\s\S]*/,'').trim()); showEmailConfirm(emailData, bubble); }
+  } catch(e) {
+    typingEl.remove();
+    full = 'Désolé, une erreur est survenue.';
   }
+
+  isLoading = false;
+  // Affiche la réponse dans l'overlay vocal et parle
+  const clean = full.replace(/AXIO_EMAIL:[\s\S]*/,'').trim();
+  document.getElementById('voiceResponse').textContent = clean.replace(/[*_#`]/g,'').substring(0, 300);
+  speakVoice(clean);
+}
+
+function speakVoice(text) {
+  window.speechSynthesis.cancel();
+  const clean = text.replace(/```[\s\S]*?```/g,'').replace(/[*_#`~]/g,'').replace(/\n+/g,' ').trim();
+  const utter = new SpeechSynthesisUtterance(clean);
+  utter.lang = 'fr-FR'; utter.rate = 1.05; utter.pitch = 1;
+  const voices = window.speechSynthesis.getVoices();
+  const frVoice = voices.find(v => v.lang.startsWith('fr') && !v.name.includes('Google')) || voices.find(v => v.lang.startsWith('fr'));
+  if (frVoice) utter.voice = frVoice;
+  isSpeaking = true;
+  setVoiceState('speaking');
+  // MIC COUPÉ pendant la parole — empêche l'autoécoute
+  if (isListening) { try { recognition.stop(); } catch(e){} isListening = false; }
+  utter.onend = () => {
+    isSpeaking = false;
+    if (voiceMode) {
+      document.getElementById('voiceTranscript').textContent = '';
+      setTimeout(startVoiceListening, 600); // Réécoute après la réponse
+    }
+  };
+  utter.onerror = () => { isSpeaking = false; if (voiceMode) setTimeout(startVoiceListening, 600); };
+  window.speechSynthesis.speak(utter);
 }
 
 function speak(text) {
   if (!voiceMode) return;
-  window.speechSynthesis.cancel();
-  // Nettoyer le texte pour la synthèse (supprimer markdown)
-  const clean = text.replace(/```[\s\S]*?```/g, 'code masqué')
-    .replace(/[*_#`~]/g, '').replace(/\n+/g, ' ').trim();
-  const utterance = new SpeechSynthesisUtterance(clean);
-  utterance.lang = 'fr-FR';
-  utterance.rate = 1.05;
-  utterance.pitch = 1;
-  // Préférer une voix française
-  const voices = window.speechSynthesis.getVoices();
-  const frVoice = voices.find(v => v.lang.startsWith('fr'));
-  if (frVoice) utterance.voice = frVoice;
-  isSpeaking = true;
-  utterance.onend = () => {
-    isSpeaking = false;
-    if (voiceMode && !isLoading) setTimeout(startListening, 400);
-  };
-  window.speechSynthesis.speak(utterance);
+  speakVoice(text);
 }
 
 // ── Email detection & sending ───────────────────────────────────────────────
