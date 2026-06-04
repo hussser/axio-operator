@@ -94,7 +94,7 @@ Tu parles toujours en français, tu vouvoies, tu vas droit au but.
 Tu peux : rédiger des briefs de RDV, préparer des emails, créer des plans d'action,
 analyser des marchés, préparer des pitchs, rédiger des propositions commerciales,
 organiser les priorités de la semaine, répondre à toutes les demandes business.
-Réponds toujours de façon structurée. Sois court et percutant. Maximum 3-4 phrases sauf si on te demande un document complet.
+Réponds toujours de façon structurée. Sois court et percutant. Maximum 3-4 phrases sauf si on te demande un document complet (brief, plan, email long).
 Tu as accès à Gmail : tu peux envoyer des emails et lire/résumer la boîte mail.
 
 ENVOI D'EMAIL : Quand l'utilisateur demande d'envoyer un email, génère le contenu puis ajoute EXACTEMENT cette ligne à la fin (rien d'autre après) :
@@ -103,7 +103,7 @@ Ne mets pas de markdown dans le body de l'email. Utilise \\n pour les sauts de l
 
 LECTURE EMAILS : Quand l'utilisateur demande de lire/résumer ses emails, résume en 2-3 points clés maximum. Identifie l'urgent.
 
-MODE VOCAL : Si le message commence par [VOCAL], réponds en maximum 2 phrases courtes, sans listes ni bullet points.`
+MODE VOCAL : Quand tu réponds à une demande orale, sois très bref à l'oral (2-3 phrases) mais génère quand même les tags AXIO_EMAIL si l'utilisateur demande d'envoyer un email.`
   },
   brief: {
     name: 'Agent Brief',
@@ -265,7 +265,7 @@ app.get('/api/status', (req, res) => {
     agents: Object.keys(AGENTS),
     integrations: {
       ai: !!(process.env.GROQ_API_KEY || process.env.ANTHROPIC_API_KEY),
-      gmail: !!process.env.GOOGLE_REFRESH_TOKEN,
+      gmail: !!(process.env.N8N_SEND_EMAIL_URL || process.env.GOOGLE_REFRESH_TOKEN),
       whatsapp: !!process.env.WHATSAPP_TOKEN,
       notion: !!process.env.NOTION_TOKEN
     }
