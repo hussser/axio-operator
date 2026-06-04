@@ -672,8 +672,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
     <div class="sub">Connectez vos outils pour activer toutes les fonctionnalités de votre opérateur IA.</div>
     <div class="modal-tabs">
       <div class="modal-tab active" onclick="switchTab('api', this)">Clé API</div>
+      <div class="modal-tab" onclick="switchTab('email', this)">Email</div>
       <div class="modal-tab" onclick="switchTab('integrations', this)">Intégrations</div>
-      <div class="modal-tab" onclick="switchTab('n8n', this)">n8n / Webhooks</div>
     </div>
 
     <!-- Tab API -->
@@ -681,6 +681,25 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
       <div class="form-group">
         <label>Clé API Anthropic (Claude)</label>
         <input type="password" id="inp-apikey" placeholder="sk-ant-api03-…">
+      </div>
+    </div>
+
+    <!-- Tab Email -->
+    <div class="tab-panel" id="tab-email">
+      <div class="form-group">
+        <label>Votre adresse email (expéditeur)</label>
+        <input type="email" id="inp-email" placeholder="votre@email.com">
+        <p style="font-size:12px;color:var(--muted);margin-top:6px;line-height:1.5">
+          Utilisé par Axio quand il envoie des emails en votre nom.
+        </p>
+      </div>
+      <div class="form-group" style="margin-top:14px">
+        <label>Email de test — vérifier l'envoi</label>
+        <div style="display:flex;gap:8px">
+          <input type="email" id="inp-test-email" placeholder="destinataire@test.com" style="flex:1">
+          <button class="btn-s" onclick="sendTestEmail()" style="white-space:nowrap">Tester</button>
+        </div>
+        <p id="test-email-status" style="font-size:12px;margin-top:6px;line-height:1.5;color:var(--muted)"></p>
       </div>
     </div>
 
@@ -719,18 +738,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
       </p>
     </div>
 
-    <!-- Tab n8n -->
-    <div class="tab-panel" id="tab-n8n">
-      <div class="form-group">
-        <label>URL du serveur Axio (backend)</label>
-        <input type="text" id="inp-serverurl" placeholder="http://localhost:3000">
-      </div>
-      <p style="font-size:12px;color:var(--muted);line-height:1.55">
-        Importez les fichiers <code>workflows/*.json</code> dans n8n.<br>
-        Configurez l'URL du webhook : <code style="color:var(--purple2)">[votre serveur]/webhook/n8n</code><br>
-        Header requis : <code style="color:var(--purple2)">x-webhook-secret: [votre secret]</code>
-      </p>
-    </div>
+    <!-- Tab Intégrations (anciennement n8n) -->
+    <div class="tab-panel" id="tab-n8n" style="display:none"></div>
 
     <div class="modal-actions">
       <button class="btn-s" onclick="closeSettings()">Fermer</button>
@@ -743,6 +752,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 // ── State ──────────────────────────────────────────────────────────────────
 let apiKey    = localStorage.getItem('axio_apikey') || '';
 let serverUrl = localStorage.getItem('axio_server') || 'https://axio-blush.vercel.app';
+let userEmail = localStorage.getItem('axio_email') || '';
 let currentAgent = 'operator';
 let messages = [];
 let isLoading = false;
@@ -1093,6 +1103,7 @@ function md(t) {
 function openSettings(tab) {
   inp_apikey.value = apiKey;
   inp_serverurl.value = serverUrl;
+  document.getElementById('inp-email').value = userEmail;
   overlay.classList.add('open');
   switchTab(tab || 'api', document.querySelector('.modal-tab'));
   setTimeout(() => inp_apikey.focus(), 120);
@@ -1101,11 +1112,29 @@ function closeSettings() { overlay.classList.remove('open'); }
 function saveSettings() {
   const k = inp_apikey.value.trim();
   const s = inp_serverurl.value.trim();
+  const e = document.getElementById('inp-email').value.trim();
   if (k) { apiKey = k; localStorage.setItem('axio_apikey', k); }
   if (s) { serverUrl = s; localStorage.setItem('axio_server', s); }
+  if (e) { userEmail = e; localStorage.setItem('axio_email', e); }
   if (k || s) apiBanner.classList.add('hidden');
   closeSettings();
   checkStatus();
+}
+
+async function sendTestEmail() {
+  const to = document.getElementById('inp-test-email').value.trim();
+  const status = document.getElementById('test-email-status');
+  if (!to) { status.textContent = '⚠️ Entrez un email destinataire.'; status.style.color = '#f59e0b'; return; }
+  status.textContent = 'Envoi en cours…'; status.style.color = 'var(--muted)';
+  try {
+    const r = await fetch(`${serverUrl}/api/send-email`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject: 'Test Axio', body: 'Bonjour,\n\nCeci est un email de test envoyé par Axio ✅\n\nAxio' })
+    });
+    const d = await r.json();
+    if (d.success) { status.textContent = '✅ Email envoyé avec succès !'; status.style.color = '#22c55e'; }
+    else { status.textContent = '❌ ' + (d.error || 'Erreur inconnue'); status.style.color = '#ef4444'; }
+  } catch(e) { status.textContent = '❌ ' + e.message; status.style.color = '#ef4444'; }
 }
 
 function switchTab(id, el) {
@@ -1240,7 +1269,7 @@ async function sendVoice(text) {
   // Ajoute aussi dans le chat normal
   emptyState.style.display = 'none';
   addMsg('user', text);
-  messages.push({ role: 'user', content: text });
+  messages.push({ role: 'user', content: '[VOCAL] ' + text });
 
   const typingEl = addTyping();
   isLoading = true;
@@ -1286,7 +1315,10 @@ async function sendVoice(text) {
 
 function speakVoice(text) {
   window.speechSynthesis.cancel();
-  const clean = text.replace(/```[\s\S]*?```/g,'').replace(/[*_#`~]/g,'').replace(/\n+/g,' ').trim();
+  let clean = text.replace(/```[\s\S]*?```/g,'').replace(/[*_#`~]/g,'').replace(/\n+/g,' ').trim();
+  // En mode vocal : limiter à 3 phrases max pour ne pas parler trop longtemps
+  const sentences = clean.match(/[^.!?]+[.!?]+/g) || [clean];
+  if (sentences.length > 3) clean = sentences.slice(0, 3).join(' ').trim();
   const utter = new SpeechSynthesisUtterance(clean);
   utter.lang = 'fr-FR'; utter.rate = 1.0; utter.pitch = 0.95; utter.volume = 1;
   const voices = window.speechSynthesis.getVoices();
